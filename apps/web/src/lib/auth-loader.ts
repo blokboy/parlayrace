@@ -1,3 +1,4 @@
+import { db } from '@starter/backend/db';
 import { createServerFn } from '@tanstack/react-start';
 import { userMiddleware } from '@/middleware/user';
 
@@ -31,9 +32,26 @@ import { userMiddleware } from '@/middleware/user';
  */
 export const authLoader = createServerFn()
   .middleware([userMiddleware])
-  .handler(({ context }) => {
+  .handler(async ({ context }) => {
+    const user = context.user ?? null;
+
+    if (!user) {
+      return {
+        user: null,
+        username: null,
+      };
+    }
+
+    const profile = await db.query.userProfile.findFirst({
+      where: (table, { eq }) => eq(table.id, user.id),
+      columns: {
+        username: true,
+      },
+    });
+
     // Return the user from context (set by userMiddleware)
     return {
-      user: context.user ?? null,
+      user,
+      username: profile?.username ?? null,
     };
   });

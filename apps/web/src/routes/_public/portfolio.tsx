@@ -484,14 +484,16 @@ const PortfolioPage = () => {
 
   const totalEquity = roundToCents(state.cash + openValue);
   const sellPosition = useMemo(
-    () => state.positions.find((position) => position.id === sellPositionId) ?? null,
+    () =>
+      state.positions.find((position) => position.id === sellPositionId) ??
+      null,
     [sellPositionId, state.positions]
   );
   const sellPositionValuation = sellPosition
-    ? valuations[sellPosition.id] ?? null
+    ? (valuations[sellPosition.id] ?? null)
     : null;
   const sellPositionCurrentValue = sellPosition
-    ? sellPositionValuation?.currentValue ?? sellPosition.stake
+    ? (sellPositionValuation?.currentValue ?? sellPosition.stake)
     : 0;
 
   const persistAndRefresh = async (next: PaperPortfolioState) => {
@@ -669,7 +671,9 @@ const PortfolioPage = () => {
                 Open paper trades for this user.
               </p>
             </div>
-            <p className="text-sm text-violet-800">Sign in to create a Parlay Team.</p>
+            <p className="text-sm text-violet-800">
+              Sign in to create a Parlay Team.
+            </p>
           </div>
         </header>
 
@@ -815,7 +819,8 @@ const PortfolioPage = () => {
                         </div>
 
                         <p>
-                          Entry: {position.buySide} ${position.entryPrice.toFixed(2)}
+                          Entry: {position.buySide} $
+                          {position.entryPrice.toFixed(2)}
                         </p>
                         <p>
                           Now:{' '}
@@ -1042,9 +1047,7 @@ const PortfolioPage = () => {
                 Entry: {sellPosition?.buySide ?? '--'}{' '}
                 {sellPosition ? `$${sellPosition.entryPrice.toFixed(2)}` : '--'}
               </p>
-              <p>
-                Current Value: ${sellPositionCurrentValue.toFixed(2)}
-              </p>
+              <p>Current Value: ${sellPositionCurrentValue.toFixed(2)}</p>
             </div>
 
             <button

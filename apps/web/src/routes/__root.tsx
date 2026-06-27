@@ -5,6 +5,7 @@ import {
   createRootRouteWithContext,
   HeadContent,
   Outlet,
+  redirect,
   Scripts,
 } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
@@ -47,9 +48,34 @@ const RootDocument = ({ children }: Readonly<{ children: ReactNode }>) => {
 };
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  beforeLoad: async () => {
-    const { user } = await authLoader();
-    return { user };
+  beforeLoad: async ({ location }) => {
+    const { user, username } = await authLoader();
+
+    const pathname = location.pathname;
+    const onUsernamePage = pathname === '/auth/username';
+
+    if (user && !username && !onUsernamePage) {
+      throw redirect({
+        to: '/auth/username',
+      });
+    }
+
+    if (!user && onUsernamePage) {
+      throw redirect({
+        to: '/auth/login',
+        search: {
+          redirect: '/auth/username',
+        },
+      });
+    }
+
+    if (user && username && onUsernamePage) {
+      throw redirect({
+        to: '/dashboard',
+      });
+    }
+
+    return { user, username };
   },
   head: () => {
     return {

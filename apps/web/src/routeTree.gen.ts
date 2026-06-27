@@ -12,8 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as PublicRouteImport } from './routes/_public'
 import { Route as PublicIndexRouteImport } from './routes/_public/index'
+import { Route as AuthUsernameRouteImport } from './routes/auth/username'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as ApiUsersRouteImport } from './routes/api/users'
+import { Route as ApiUserProfileRouteImport } from './routes/api/user-profile'
 import { Route as ApiTeamColorsRouteImport } from './routes/api/team-colors'
 import { Route as ApiParlayTeamsRouteImport } from './routes/api/parlay-teams'
 import { Route as ApiPaperPortfolioRouteImport } from './routes/api/paper-portfolio'
@@ -41,6 +43,11 @@ const PublicIndexRoute = PublicIndexRouteImport.update({
   path: '/',
   getParentRoute: () => PublicRoute,
 } as any)
+const AuthUsernameRoute = AuthUsernameRouteImport.update({
+  id: '/username',
+  path: '/username',
+  getParentRoute: () => AuthRoute,
+} as any)
 const AuthLoginRoute = AuthLoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -49,6 +56,11 @@ const AuthLoginRoute = AuthLoginRouteImport.update({
 const ApiUsersRoute = ApiUsersRouteImport.update({
   id: '/api/users',
   path: '/api/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiUserProfileRoute = ApiUserProfileRouteImport.update({
+  id: '/api/user-profile',
+  path: '/api/user-profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTeamColorsRoute = ApiTeamColorsRouteImport.update({
@@ -124,8 +136,10 @@ export interface FileRoutesByFullPath {
   '/api/paper-portfolio': typeof ApiPaperPortfolioRoute
   '/api/parlay-teams': typeof ApiParlayTeamsRoute
   '/api/team-colors': typeof ApiTeamColorsRoute
+  '/api/user-profile': typeof ApiUserProfileRoute
   '/api/users': typeof ApiUsersRoute
   '/auth/login': typeof AuthLoginRoute
+  '/auth/username': typeof AuthUsernameRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
   '/api/sync/polymarket': typeof ApiSyncPolymarketRoute
@@ -141,8 +155,10 @@ export interface FileRoutesByTo {
   '/api/paper-portfolio': typeof ApiPaperPortfolioRoute
   '/api/parlay-teams': typeof ApiParlayTeamsRoute
   '/api/team-colors': typeof ApiTeamColorsRoute
+  '/api/user-profile': typeof ApiUserProfileRoute
   '/api/users': typeof ApiUsersRoute
   '/auth/login': typeof AuthLoginRoute
+  '/auth/username': typeof AuthUsernameRoute
   '/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
@@ -161,8 +177,10 @@ export interface FileRoutesById {
   '/api/paper-portfolio': typeof ApiPaperPortfolioRoute
   '/api/parlay-teams': typeof ApiParlayTeamsRoute
   '/api/team-colors': typeof ApiTeamColorsRoute
+  '/api/user-profile': typeof ApiUserProfileRoute
   '/api/users': typeof ApiUsersRoute
   '/auth/login': typeof AuthLoginRoute
+  '/auth/username': typeof AuthUsernameRoute
   '/_public/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
@@ -182,8 +200,10 @@ export interface FileRouteTypes {
     | '/api/paper-portfolio'
     | '/api/parlay-teams'
     | '/api/team-colors'
+    | '/api/user-profile'
     | '/api/users'
     | '/auth/login'
+    | '/auth/username'
     | '/api/auth/$'
     | '/api/markets/$marketId'
     | '/api/sync/polymarket'
@@ -199,8 +219,10 @@ export interface FileRouteTypes {
     | '/api/paper-portfolio'
     | '/api/parlay-teams'
     | '/api/team-colors'
+    | '/api/user-profile'
     | '/api/users'
     | '/auth/login'
+    | '/auth/username'
     | '/'
     | '/api/auth/$'
     | '/api/markets/$marketId'
@@ -218,8 +240,10 @@ export interface FileRouteTypes {
     | '/api/paper-portfolio'
     | '/api/parlay-teams'
     | '/api/team-colors'
+    | '/api/user-profile'
     | '/api/users'
     | '/auth/login'
+    | '/auth/username'
     | '/_public/'
     | '/api/auth/$'
     | '/api/markets/$marketId'
@@ -234,6 +258,7 @@ export interface RootRouteChildren {
   ApiPaperPortfolioRoute: typeof ApiPaperPortfolioRoute
   ApiParlayTeamsRoute: typeof ApiParlayTeamsRoute
   ApiTeamColorsRoute: typeof ApiTeamColorsRoute
+  ApiUserProfileRoute: typeof ApiUserProfileRoute
   ApiUsersRoute: typeof ApiUsersRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiSyncPolymarketRoute: typeof ApiSyncPolymarketRoute
@@ -262,6 +287,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PublicIndexRouteImport
       parentRoute: typeof PublicRoute
     }
+    '/auth/username': {
+      id: '/auth/username'
+      path: '/username'
+      fullPath: '/auth/username'
+      preLoaderRoute: typeof AuthUsernameRouteImport
+      parentRoute: typeof AuthRoute
+    }
     '/auth/login': {
       id: '/auth/login'
       path: '/login'
@@ -274,6 +306,13 @@ declare module '@tanstack/react-router' {
       path: '/api/users'
       fullPath: '/api/users'
       preLoaderRoute: typeof ApiUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/user-profile': {
+      id: '/api/user-profile'
+      path: '/api/user-profile'
+      fullPath: '/api/user-profile'
+      preLoaderRoute: typeof ApiUserProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/team-colors': {
@@ -384,10 +423,12 @@ const PublicRouteWithChildren =
 
 interface AuthRouteChildren {
   AuthLoginRoute: typeof AuthLoginRoute
+  AuthUsernameRoute: typeof AuthUsernameRoute
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
   AuthLoginRoute: AuthLoginRoute,
+  AuthUsernameRoute: AuthUsernameRoute,
 }
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
@@ -412,6 +453,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPaperPortfolioRoute: ApiPaperPortfolioRoute,
   ApiParlayTeamsRoute: ApiParlayTeamsRoute,
   ApiTeamColorsRoute: ApiTeamColorsRoute,
+  ApiUserProfileRoute: ApiUserProfileRoute,
   ApiUsersRoute: ApiUsersRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiSyncPolymarketRoute: ApiSyncPolymarketRoute,

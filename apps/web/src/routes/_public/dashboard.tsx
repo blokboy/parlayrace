@@ -52,6 +52,7 @@ type SelectionSide = 'home' | 'draw' | 'away';
 type SelectedTrade = {
   marketId: string;
   matchup: string;
+  kickoff: string;
   homeTeam: string;
   awayTeam: string;
   side: SelectionSide;
@@ -64,6 +65,70 @@ type MarketDetail = {
   yesPrice: number;
   noPrice: number;
   updatedAt: string | null;
+};
+
+type PaperPosition = {
+  id: string;
+  marketId: string;
+  matchup: string;
+  homeTeam: string;
+  awayTeam: string;
+  side: SelectionSide;
+  buySide: 'YES' | 'NO';
+  stake: number;
+  entryPrice: number;
+  quantity: number;
+  kickoff: string;
+  status: 'OPEN' | 'CLOSED';
+  createdAt: string;
+  closedAt: string | null;
+  closeValue: number | null;
+};
+
+type PaperPortfolioState = {
+  cash: number;
+  positions: PaperPosition[];
+};
+
+const roundToCents = (value: number) => Math.round(value * 100) / 100;
+
+const defaultPortfolioState = (): PaperPortfolioState => ({
+  cash: 1000,
+  positions: [],
+});
+
+const fetchPortfolioStateForUser =
+  async (): Promise<PaperPortfolioState | null> => {
+    const response = await fetch('/api/paper-portfolio', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (response.status === 401) {
+      return null;
+    }
+
+    if (!response.ok) {
+      return defaultPortfolioState();
+    }
+
+    const payload = (await response.json()) as { state?: PaperPortfolioState };
+    return payload.state ?? defaultPortfolioState();
+  };
+
+const savePortfolioStateForUser = async (
+  state: PaperPortfolioState
+): Promise<boolean> => {
+  const response = await fetch('/api/paper-portfolio', {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ state }),
+  });
+
+  return response.ok;
 };
 
 const normalizeHexColor = (input: string | null | undefined): string | null => {
@@ -324,7 +389,9 @@ const DashboardPage = () => {
   const [marketDetail, setMarketDetail] = useState<MarketDetail | null>(null);
   const [stake, setStake] = useState(25);
   const [pickSide, setPickSide] = useState<'YES' | 'NO'>('YES');
+  const [availableBalance, setAvailableBalance] = useState(1000);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [buying, setBuying] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userTimeZone, setUserTimeZone] = useState('UTC');
 
@@ -455,7 +522,30 @@ const DashboardPage = () => {
     };
   }, [selectedTrade]);
 
-  const availableBalance = 1000;
+  useEffect(() => {
+    if (!selectedTrade) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadBalance = async () => {
+      const portfolio = await fetchPortfolioStateForUser();
+      if (!cancelled && portfolio) {
+        setAvailableBalance(portfolio.cash);
+        setStake((currentStake) =>
+          Math.min(currentStake, Math.floor(portfolio.cash))
+        );
+      }
+    };
+
+    void loadBalance();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTrade]);
+
   const selectedPrice =
     pickSide === 'YES'
       ? (marketDetail?.yesPrice ?? 0)
@@ -474,6 +564,7 @@ const DashboardPage = () => {
     setSelectedTrade({
       marketId: card.id,
       matchup: card.matchup,
+      kickoff: card.kickoffIso,
       homeTeam: card.home.name,
       awayTeam: card.away.name,
       side,
@@ -481,6 +572,61 @@ const DashboardPage = () => {
     });
     setPickSide('YES');
     setStake(25);
+  };
+
+  const handleConfirmBuy = async () => {
+    if (!selectedTrade || !marketDetail || selectedPrice <= 0 || stake <= 0) {
+      return;
+    }
+
+    setBuying(true);
+
+    const portfolio = await fetchPortfolioStateForUser();
+
+    if (!portfolio) {
+      setBuying(false);
+      window.location.assign('/auth/login?redirect=/dashboard');
+      return;
+    }
+
+    const effectiveStake = roundToCents(Math.min(stake, portfolio.cash));
+    if (effectiveStake <= 0) {
+      setBuying(false);
+      return;
+    }
+
+    const position: PaperPosition = {
+      id: crypto.randomUUID(),
+      marketId: selectedTrade.marketId,
+      matchup: selectedTrade.matchup,
+      homeTeam: selectedTrade.homeTeam,
+      awayTeam: selectedTrade.awayTeam,
+      side: selectedTrade.side,
+      buySide: pickSide,
+      stake: effectiveStake,
+      entryPrice: selectedPrice,
+      quantity: roundToCents(effectiveStake / selectedPrice),
+      kickoff: selectedTrade.kickoff,
+      status: 'OPEN',
+      createdAt: new Date().toISOString(),
+      closedAt: null,
+      closeValue: null,
+    };
+
+    const nextState: PaperPortfolioState = {
+      cash: roundToCents(portfolio.cash - effectiveStake),
+      positions: [position, ...portfolio.positions],
+    };
+
+    const saved = await savePortfolioStateForUser(nextState);
+    setBuying(false);
+
+    if (!saved) {
+      return;
+    }
+
+    setAvailableBalance(nextState.cash);
+    setSelectedTrade(null);
   };
 
   return (
@@ -598,8 +744,8 @@ const DashboardPage = () => {
               </div>
               <input
                 type="range"
-                min="1"
-                max={availableBalance}
+                min="0"
+                max={Math.max(0, Math.floor(availableBalance))}
                 step="1"
                 value={stake}
                 onChange={(event) => setStake(Number(event.target.value))}
@@ -644,7 +790,14 @@ const DashboardPage = () => {
 
             <button
               type="button"
-              disabled={loadingDetail || !marketDetail || selectedPrice <= 0}
+              disabled={
+                loadingDetail ||
+                buying ||
+                !marketDetail ||
+                selectedPrice <= 0 ||
+                stake <= 0
+              }
+              onClick={() => void handleConfirmBuy()}
               className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span>Confirm BUY {pickSide}</span>

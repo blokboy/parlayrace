@@ -8,6 +8,7 @@ import { routeTree } from './routeTree.gen';
 export type RouterContext = {
   queryClient: QueryClient;
   user: User | null;
+  username: string | null;
 };
 
 export const getRouter = () => {
@@ -36,7 +37,7 @@ export const getRouter = () => {
   const router = createTanStackRouter({
     routeTree,
     scrollRestoration: true,
-    context: { queryClient, user: null },
+    context: { queryClient, user: null, username: null },
     defaultPreload: 'intent',
   });
 
