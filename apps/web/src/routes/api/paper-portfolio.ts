@@ -1,5 +1,8 @@
 import { auth } from '@starter/backend/auth';
+import { db } from '@starter/backend/db';
+import { paperPortfolio } from '@starter/backend/schema';
 import { createFileRoute } from '@tanstack/react-router';
+import { eq } from 'drizzle-orm';
 
 type PositionSide = 'home' | 'draw' | 'away';
 type BuySide = 'YES' | 'NO';
@@ -32,18 +35,6 @@ const initialState = (): PaperPortfolioState => ({
   positions: [],
 });
 
-const getStore = () => {
-  const scoped = globalThis as typeof globalThis & {
-    __paperPortfolioStore?: Map<string, PaperPortfolioState>;
-  };
-
-  if (!scoped.__paperPortfolioStore) {
-    scoped.__paperPortfolioStore = new Map<string, PaperPortfolioState>();
-  }
-
-  return scoped.__paperPortfolioStore;
-};
-
 const getSessionUser = async (request: Request) => {
   const session = await auth.api.getSession({ headers: request.headers });
   return session?.user ?? null;
@@ -66,6 +57,27 @@ const normalizeState = (
   };
 };
 
+const getPortfolioStateForUser = async (
+  userId: string
+): Promise<PaperPortfolioState> => {
+  const row = await db.query.paperPortfolio.findFirst({
+    where: eq(paperPortfolio.userId, userId),
+    columns: {
+      cashBalance: true,
+      positions: true,
+    },
+  });
+
+  if (!row) {
+    return initialState();
+  }
+
+  return normalizeState({
+    cash: row.cashBalance,
+    positions: Array.isArray(row.positions) ? row.positions : [],
+  });
+};
+
 export const Route = createFileRoute('/api/paper-portfolio')({
   server: {
     handlers: {
@@ -79,8 +91,7 @@ export const Route = createFileRoute('/api/paper-portfolio')({
           );
         }
 
-        const store = getStore();
-        const current = store.get(user.id) ?? initialState();
+        const current = await getPortfolioStateForUser(user.id);
 
         return Response.json({
           ok: true,
@@ -102,8 +113,22 @@ export const Route = createFileRoute('/api/paper-portfolio')({
         };
 
         const normalized = normalizeState(body.state);
-        const store = getStore();
-        store.set(user.id, normalized);
+
+        await db
+          .insert(paperPortfolio)
+          .values({
+            userId: user.id,
+            cashBalance: normalized.cash,
+            positions: normalized.positions,
+          })
+          .onConflictDoUpdate({
+            target: paperPortfolio.userId,
+            set: {
+              cashBalance: normalized.cash,
+              positions: normalized.positions,
+              updatedAt: new Date(),
+            },
+          });
 
         return Response.json({ ok: true, state: normalized });
       },

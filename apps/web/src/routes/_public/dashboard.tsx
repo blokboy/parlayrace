@@ -141,7 +141,6 @@ const formatKickoff = (isoDate: string, timeZone: string): string => {
     hour: '2-digit',
     minute: '2-digit',
     timeZone,
-    timeZoneName: 'short',
   }).format(value);
 };
 

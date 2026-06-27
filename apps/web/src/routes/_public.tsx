@@ -1,6 +1,7 @@
 import {
   createFileRoute,
   Link,
+  useLocation,
   Outlet,
   useNavigate,
 } from '@tanstack/react-router';
@@ -8,7 +9,9 @@ import { signInWithGoogle, signOut } from '@/lib/auth-client';
 
 const PublicLayout = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const user = Route.useRouteContext({ from: '__root__' }).user;
+  const isDashboardPage = location.pathname === '/dashboard';
 
   return (
     <>
@@ -20,42 +23,44 @@ const PublicLayout = () => {
           >
             Parlayrace
           </Link>
-          <div className="flex items-center gap-2">
-            {user ? (
-              <>
-                <button
-                  type="button"
-                  className="landing-header-button-ghost"
-                  onClick={() => navigate({ to: '/portfolio' })}
-                >
-                  Portfolio
-                </button>
+          {isDashboardPage ? (
+            <div className="flex items-center gap-2">
+              {user ? (
+                <>
+                  <button
+                    type="button"
+                    className="landing-header-button-ghost"
+                    onClick={() => navigate({ to: '/portfolio' })}
+                  >
+                    Portfolio
+                  </button>
+                  <button
+                    type="button"
+                    className="landing-header-button"
+                    onClick={async () => {
+                      await signOut();
+                      window.location.assign('/');
+                    }}
+                  >
+                    Sign Out
+                  </button>
+                </>
+              ) : (
                 <button
                   type="button"
                   className="landing-header-button"
-                  onClick={async () => {
-                    await signOut();
-                    window.location.assign('/');
-                  }}
+                  onClick={() =>
+                    signInWithGoogle({
+                      callbackURL: '/dashboard',
+                      newUserCallbackURL: '/dashboard',
+                    })
+                  }
                 >
-                  Sign Out
+                  Sign In
                 </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="landing-header-button"
-                onClick={() =>
-                  signInWithGoogle({
-                    callbackURL: '/dashboard',
-                    newUserCallbackURL: '/dashboard',
-                  })
-                }
-              >
-                Sign In
-              </button>
-            )}
-          </div>
+              )}
+            </div>
+          ) : null}
         </div>
       </header>
       <Outlet />
