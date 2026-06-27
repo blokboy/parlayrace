@@ -35,6 +35,12 @@ const LandingPage = () => {
                 >
                   Explore Dashboard
                 </Link>
+                <Link
+                  to="/portfolio"
+                  className="rounded-full border border-violet-200 bg-white px-5 py-3 text-sm font-semibold text-violet-600 transition hover:bg-violet-50 hover:text-violet-700"
+                >
+                  Open Portfolio
+                </Link>
               </div>
               <div
                 id="arcade-features"

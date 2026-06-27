@@ -13,11 +13,15 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as PublicRouteImport } from './routes/_public'
 import { Route as PublicIndexRouteImport } from './routes/_public/index'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
+import { Route as ApiUsersRouteImport } from './routes/api/users'
 import { Route as ApiTeamColorsRouteImport } from './routes/api/team-colors'
+import { Route as ApiParlayTeamsRouteImport } from './routes/api/parlay-teams'
+import { Route as ApiPaperPortfolioRouteImport } from './routes/api/paper-portfolio'
 import { Route as ApiMarketsRouteImport } from './routes/api/markets'
 import { Route as ApiLiveEventTimeRouteImport } from './routes/api/live-event-time'
 import { Route as PublicTermsRouteImport } from './routes/_public/terms'
 import { Route as PublicPrivacyRouteImport } from './routes/_public/privacy'
+import { Route as PublicPortfolioRouteImport } from './routes/_public/portfolio'
 import { Route as PublicDashboardRouteImport } from './routes/_public/dashboard'
 import { Route as ApiSyncPolymarketRouteImport } from './routes/api/sync/polymarket'
 import { Route as ApiMarketsMarketIdRouteImport } from './routes/api/markets.$marketId'
@@ -42,9 +46,24 @@ const AuthLoginRoute = AuthLoginRouteImport.update({
   path: '/login',
   getParentRoute: () => AuthRoute,
 } as any)
+const ApiUsersRoute = ApiUsersRouteImport.update({
+  id: '/api/users',
+  path: '/api/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTeamColorsRoute = ApiTeamColorsRouteImport.update({
   id: '/api/team-colors',
   path: '/api/team-colors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiParlayTeamsRoute = ApiParlayTeamsRouteImport.update({
+  id: '/api/parlay-teams',
+  path: '/api/parlay-teams',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPaperPortfolioRoute = ApiPaperPortfolioRouteImport.update({
+  id: '/api/paper-portfolio',
+  path: '/api/paper-portfolio',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiMarketsRoute = ApiMarketsRouteImport.update({
@@ -65,6 +84,11 @@ const PublicTermsRoute = PublicTermsRouteImport.update({
 const PublicPrivacyRoute = PublicPrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
+  getParentRoute: () => PublicRoute,
+} as any)
+const PublicPortfolioRoute = PublicPortfolioRouteImport.update({
+  id: '/portfolio',
+  path: '/portfolio',
   getParentRoute: () => PublicRoute,
 } as any)
 const PublicDashboardRoute = PublicDashboardRouteImport.update({
@@ -92,11 +116,15 @@ export interface FileRoutesByFullPath {
   '/': typeof PublicIndexRoute
   '/auth': typeof AuthRouteWithChildren
   '/dashboard': typeof PublicDashboardRoute
+  '/portfolio': typeof PublicPortfolioRoute
   '/privacy': typeof PublicPrivacyRoute
   '/terms': typeof PublicTermsRoute
   '/api/live-event-time': typeof ApiLiveEventTimeRoute
   '/api/markets': typeof ApiMarketsRouteWithChildren
+  '/api/paper-portfolio': typeof ApiPaperPortfolioRoute
+  '/api/parlay-teams': typeof ApiParlayTeamsRoute
   '/api/team-colors': typeof ApiTeamColorsRoute
+  '/api/users': typeof ApiUsersRoute
   '/auth/login': typeof AuthLoginRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
@@ -105,11 +133,15 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/auth': typeof AuthRouteWithChildren
   '/dashboard': typeof PublicDashboardRoute
+  '/portfolio': typeof PublicPortfolioRoute
   '/privacy': typeof PublicPrivacyRoute
   '/terms': typeof PublicTermsRoute
   '/api/live-event-time': typeof ApiLiveEventTimeRoute
   '/api/markets': typeof ApiMarketsRouteWithChildren
+  '/api/paper-portfolio': typeof ApiPaperPortfolioRoute
+  '/api/parlay-teams': typeof ApiParlayTeamsRoute
   '/api/team-colors': typeof ApiTeamColorsRoute
+  '/api/users': typeof ApiUsersRoute
   '/auth/login': typeof AuthLoginRoute
   '/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -121,11 +153,15 @@ export interface FileRoutesById {
   '/_public': typeof PublicRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
   '/_public/dashboard': typeof PublicDashboardRoute
+  '/_public/portfolio': typeof PublicPortfolioRoute
   '/_public/privacy': typeof PublicPrivacyRoute
   '/_public/terms': typeof PublicTermsRoute
   '/api/live-event-time': typeof ApiLiveEventTimeRoute
   '/api/markets': typeof ApiMarketsRouteWithChildren
+  '/api/paper-portfolio': typeof ApiPaperPortfolioRoute
+  '/api/parlay-teams': typeof ApiParlayTeamsRoute
   '/api/team-colors': typeof ApiTeamColorsRoute
+  '/api/users': typeof ApiUsersRoute
   '/auth/login': typeof AuthLoginRoute
   '/_public/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -138,11 +174,15 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/dashboard'
+    | '/portfolio'
     | '/privacy'
     | '/terms'
     | '/api/live-event-time'
     | '/api/markets'
+    | '/api/paper-portfolio'
+    | '/api/parlay-teams'
     | '/api/team-colors'
+    | '/api/users'
     | '/auth/login'
     | '/api/auth/$'
     | '/api/markets/$marketId'
@@ -151,11 +191,15 @@ export interface FileRouteTypes {
   to:
     | '/auth'
     | '/dashboard'
+    | '/portfolio'
     | '/privacy'
     | '/terms'
     | '/api/live-event-time'
     | '/api/markets'
+    | '/api/paper-portfolio'
+    | '/api/parlay-teams'
     | '/api/team-colors'
+    | '/api/users'
     | '/auth/login'
     | '/'
     | '/api/auth/$'
@@ -166,11 +210,15 @@ export interface FileRouteTypes {
     | '/_public'
     | '/auth'
     | '/_public/dashboard'
+    | '/_public/portfolio'
     | '/_public/privacy'
     | '/_public/terms'
     | '/api/live-event-time'
     | '/api/markets'
+    | '/api/paper-portfolio'
+    | '/api/parlay-teams'
     | '/api/team-colors'
+    | '/api/users'
     | '/auth/login'
     | '/_public/'
     | '/api/auth/$'
@@ -183,7 +231,10 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRouteWithChildren
   ApiLiveEventTimeRoute: typeof ApiLiveEventTimeRoute
   ApiMarketsRoute: typeof ApiMarketsRouteWithChildren
+  ApiPaperPortfolioRoute: typeof ApiPaperPortfolioRoute
+  ApiParlayTeamsRoute: typeof ApiParlayTeamsRoute
   ApiTeamColorsRoute: typeof ApiTeamColorsRoute
+  ApiUsersRoute: typeof ApiUsersRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiSyncPolymarketRoute: typeof ApiSyncPolymarketRoute
 }
@@ -218,11 +269,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthLoginRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/api/users': {
+      id: '/api/users'
+      path: '/api/users'
+      fullPath: '/api/users'
+      preLoaderRoute: typeof ApiUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/team-colors': {
       id: '/api/team-colors'
       path: '/api/team-colors'
       fullPath: '/api/team-colors'
       preLoaderRoute: typeof ApiTeamColorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/parlay-teams': {
+      id: '/api/parlay-teams'
+      path: '/api/parlay-teams'
+      fullPath: '/api/parlay-teams'
+      preLoaderRoute: typeof ApiParlayTeamsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/paper-portfolio': {
+      id: '/api/paper-portfolio'
+      path: '/api/paper-portfolio'
+      fullPath: '/api/paper-portfolio'
+      preLoaderRoute: typeof ApiPaperPortfolioRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/markets': {
@@ -251,6 +323,13 @@ declare module '@tanstack/react-router' {
       path: '/privacy'
       fullPath: '/privacy'
       preLoaderRoute: typeof PublicPrivacyRouteImport
+      parentRoute: typeof PublicRoute
+    }
+    '/_public/portfolio': {
+      id: '/_public/portfolio'
+      path: '/portfolio'
+      fullPath: '/portfolio'
+      preLoaderRoute: typeof PublicPortfolioRouteImport
       parentRoute: typeof PublicRoute
     }
     '/_public/dashboard': {
@@ -286,6 +365,7 @@ declare module '@tanstack/react-router' {
 
 interface PublicRouteChildren {
   PublicDashboardRoute: typeof PublicDashboardRoute
+  PublicPortfolioRoute: typeof PublicPortfolioRoute
   PublicPrivacyRoute: typeof PublicPrivacyRoute
   PublicTermsRoute: typeof PublicTermsRoute
   PublicIndexRoute: typeof PublicIndexRoute
@@ -293,6 +373,7 @@ interface PublicRouteChildren {
 
 const PublicRouteChildren: PublicRouteChildren = {
   PublicDashboardRoute: PublicDashboardRoute,
+  PublicPortfolioRoute: PublicPortfolioRoute,
   PublicPrivacyRoute: PublicPrivacyRoute,
   PublicTermsRoute: PublicTermsRoute,
   PublicIndexRoute: PublicIndexRoute,
@@ -328,7 +409,10 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRouteWithChildren,
   ApiLiveEventTimeRoute: ApiLiveEventTimeRoute,
   ApiMarketsRoute: ApiMarketsRouteWithChildren,
+  ApiPaperPortfolioRoute: ApiPaperPortfolioRoute,
+  ApiParlayTeamsRoute: ApiParlayTeamsRoute,
   ApiTeamColorsRoute: ApiTeamColorsRoute,
+  ApiUsersRoute: ApiUsersRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiSyncPolymarketRoute: ApiSyncPolymarketRoute,
 }
