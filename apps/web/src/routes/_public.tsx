@@ -1,8 +1,8 @@
 import {
   createFileRoute,
   Link,
-  useLocation,
   Outlet,
+  useLocation,
   useNavigate,
 } from '@tanstack/react-router';
 import { signInWithGoogle, signOut } from '@/lib/auth-client';

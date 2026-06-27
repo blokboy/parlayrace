@@ -2,7 +2,6 @@ import { auth } from '@starter/backend/auth';
 import { db } from '@starter/backend/db';
 import { paperPortfolio } from '@starter/backend/schema';
 import { createFileRoute } from '@tanstack/react-router';
-import { eq } from 'drizzle-orm';
 
 type PositionSide = 'home' | 'draw' | 'away';
 type BuySide = 'YES' | 'NO';
@@ -61,7 +60,7 @@ const getPortfolioStateForUser = async (
   userId: string
 ): Promise<PaperPortfolioState> => {
   const row = await db.query.paperPortfolio.findFirst({
-    where: eq(paperPortfolio.userId, userId),
+    where: (table, { eq }) => eq(table.userId, userId),
     columns: {
       cashBalance: true,
       positions: true,
