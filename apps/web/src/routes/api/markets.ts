@@ -11,6 +11,9 @@ type PolymarketEvent = {
   id: string | number;
   title: string;
   startDate: string;
+  endDate: string;
+  slug?: string;
+  seriesSlug?: string;
   teams: PolymarketTeam[] | null;
   active?: boolean;
   closed?: boolean;
@@ -76,6 +79,12 @@ const inWindow = (isoDate: string, from: Date, to: Date) => {
   return value >= from && value <= to;
 };
 
+const isFifaEvent = (event: PolymarketEvent) => {
+  const series = (event.seriesSlug ?? '').toLowerCase();
+  const slug = (event.slug ?? '').toLowerCase();
+  return series === 'soccer-fifwc' || slug.startsWith('fifwc-');
+};
+
 const toMarketItem = (event: PolymarketEvent): MarketItem | null => {
   if (!event.teams || event.teams.length < 2) {
     return null;
@@ -99,7 +108,7 @@ const toMarketItem = (event: PolymarketEvent): MarketItem | null => {
     sourceProvider: 'POLYMARKET',
     category: 'fifa-games',
     matchup: `${home.name} vs ${away.name}`,
-    kickoff: event.startDate,
+    kickoff: event.endDate,
     homeTeam: home.name,
     awayTeam: away.name,
     legs: [
@@ -141,7 +150,8 @@ export const Route = createFileRoute('/api/markets')({
         const to = queryTo ?? defaultWindow.to;
 
         const markets = events
-          .filter((event) => inWindow(event.startDate, from, to))
+          .filter((event) => isFifaEvent(event))
+          .filter((event) => inWindow(event.endDate, from, to))
           .map(toMarketItem)
           .filter((market): market is MarketItem => market !== null)
           .slice(0, 24);

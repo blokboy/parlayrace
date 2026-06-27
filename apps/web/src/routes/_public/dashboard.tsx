@@ -476,7 +476,7 @@ const DashboardPage = () => {
   };
 
   return (
-    <main className="dashboard-arcade landing-arcade relative min-h-screen overflow-hidden">
+    <main className="dashboard-arcade landing-arcade relative min-h-screen overflow-hidden pt-16">
       <div className="landing-arcade__glow" />
       <div className="landing-arcade__scanlines" />
       <div className="dashboard-arcade__content relative z-10 mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -652,6 +652,6 @@ const DashboardPage = () => {
   );
 };
 
-export const Route = createFileRoute('/_protected/dashboard')({
+export const Route = createFileRoute('/_public/dashboard')({
   component: DashboardPage,
 });

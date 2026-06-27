@@ -11,12 +11,16 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as PublicRouteImport } from './routes/_public'
-import { Route as ProtectedRouteImport } from './routes/_protected'
 import { Route as PublicIndexRouteImport } from './routes/_public/index'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
+import { Route as ApiTeamColorsRouteImport } from './routes/api/team-colors'
+import { Route as ApiMarketsRouteImport } from './routes/api/markets'
+import { Route as ApiLiveEventTimeRouteImport } from './routes/api/live-event-time'
 import { Route as PublicTermsRouteImport } from './routes/_public/terms'
 import { Route as PublicPrivacyRouteImport } from './routes/_public/privacy'
-import { Route as ProtectedDashboardRouteImport } from './routes/_protected/dashboard'
+import { Route as PublicDashboardRouteImport } from './routes/_public/dashboard'
+import { Route as ApiSyncPolymarketRouteImport } from './routes/api/sync/polymarket'
+import { Route as ApiMarketsMarketIdRouteImport } from './routes/api/markets.$marketId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const AuthRoute = AuthRouteImport.update({
@@ -26,10 +30,6 @@ const AuthRoute = AuthRouteImport.update({
 } as any)
 const PublicRoute = PublicRouteImport.update({
   id: '/_public',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProtectedRoute = ProtectedRouteImport.update({
-  id: '/_protected',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PublicIndexRoute = PublicIndexRouteImport.update({
@@ -42,6 +42,21 @@ const AuthLoginRoute = AuthLoginRouteImport.update({
   path: '/login',
   getParentRoute: () => AuthRoute,
 } as any)
+const ApiTeamColorsRoute = ApiTeamColorsRouteImport.update({
+  id: '/api/team-colors',
+  path: '/api/team-colors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMarketsRoute = ApiMarketsRouteImport.update({
+  id: '/api/markets',
+  path: '/api/markets',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiLiveEventTimeRoute = ApiLiveEventTimeRouteImport.update({
+  id: '/api/live-event-time',
+  path: '/api/live-event-time',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PublicTermsRoute = PublicTermsRouteImport.update({
   id: '/terms',
   path: '/terms',
@@ -52,10 +67,20 @@ const PublicPrivacyRoute = PublicPrivacyRouteImport.update({
   path: '/privacy',
   getParentRoute: () => PublicRoute,
 } as any)
-const ProtectedDashboardRoute = ProtectedDashboardRouteImport.update({
+const PublicDashboardRoute = PublicDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
-  getParentRoute: () => ProtectedRoute,
+  getParentRoute: () => PublicRoute,
+} as any)
+const ApiSyncPolymarketRoute = ApiSyncPolymarketRouteImport.update({
+  id: '/api/sync/polymarket',
+  path: '/api/sync/polymarket',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMarketsMarketIdRoute = ApiMarketsMarketIdRouteImport.update({
+  id: '/$marketId',
+  path: '/$marketId',
+  getParentRoute: () => ApiMarketsRoute,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
@@ -66,32 +91,46 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof PublicIndexRoute
   '/auth': typeof AuthRouteWithChildren
-  '/dashboard': typeof ProtectedDashboardRoute
+  '/dashboard': typeof PublicDashboardRoute
   '/privacy': typeof PublicPrivacyRoute
   '/terms': typeof PublicTermsRoute
+  '/api/live-event-time': typeof ApiLiveEventTimeRoute
+  '/api/markets': typeof ApiMarketsRouteWithChildren
+  '/api/team-colors': typeof ApiTeamColorsRoute
   '/auth/login': typeof AuthLoginRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
+  '/api/sync/polymarket': typeof ApiSyncPolymarketRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof PublicIndexRoute
   '/auth': typeof AuthRouteWithChildren
-  '/dashboard': typeof ProtectedDashboardRoute
+  '/dashboard': typeof PublicDashboardRoute
   '/privacy': typeof PublicPrivacyRoute
   '/terms': typeof PublicTermsRoute
+  '/api/live-event-time': typeof ApiLiveEventTimeRoute
+  '/api/markets': typeof ApiMarketsRouteWithChildren
+  '/api/team-colors': typeof ApiTeamColorsRoute
   '/auth/login': typeof AuthLoginRoute
+  '/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
+  '/api/sync/polymarket': typeof ApiSyncPolymarketRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/_protected': typeof ProtectedRouteWithChildren
   '/_public': typeof PublicRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
-  '/_protected/dashboard': typeof ProtectedDashboardRoute
+  '/_public/dashboard': typeof PublicDashboardRoute
   '/_public/privacy': typeof PublicPrivacyRoute
   '/_public/terms': typeof PublicTermsRoute
+  '/api/live-event-time': typeof ApiLiveEventTimeRoute
+  '/api/markets': typeof ApiMarketsRouteWithChildren
+  '/api/team-colors': typeof ApiTeamColorsRoute
   '/auth/login': typeof AuthLoginRoute
   '/_public/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
+  '/api/sync/polymarket': typeof ApiSyncPolymarketRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -101,35 +140,52 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/privacy'
     | '/terms'
+    | '/api/live-event-time'
+    | '/api/markets'
+    | '/api/team-colors'
     | '/auth/login'
     | '/api/auth/$'
+    | '/api/markets/$marketId'
+    | '/api/sync/polymarket'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/auth'
     | '/dashboard'
     | '/privacy'
     | '/terms'
+    | '/api/live-event-time'
+    | '/api/markets'
+    | '/api/team-colors'
     | '/auth/login'
+    | '/'
     | '/api/auth/$'
+    | '/api/markets/$marketId'
+    | '/api/sync/polymarket'
   id:
     | '__root__'
-    | '/_protected'
     | '/_public'
     | '/auth'
-    | '/_protected/dashboard'
+    | '/_public/dashboard'
     | '/_public/privacy'
     | '/_public/terms'
+    | '/api/live-event-time'
+    | '/api/markets'
+    | '/api/team-colors'
     | '/auth/login'
     | '/_public/'
     | '/api/auth/$'
+    | '/api/markets/$marketId'
+    | '/api/sync/polymarket'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  ProtectedRoute: typeof ProtectedRouteWithChildren
   PublicRoute: typeof PublicRouteWithChildren
   AuthRoute: typeof AuthRouteWithChildren
+  ApiLiveEventTimeRoute: typeof ApiLiveEventTimeRoute
+  ApiMarketsRoute: typeof ApiMarketsRouteWithChildren
+  ApiTeamColorsRoute: typeof ApiTeamColorsRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiSyncPolymarketRoute: typeof ApiSyncPolymarketRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -148,13 +204,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PublicRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_protected': {
-      id: '/_protected'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof ProtectedRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_public/': {
       id: '/_public/'
       path: '/'
@@ -168,6 +217,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/auth/login'
       preLoaderRoute: typeof AuthLoginRouteImport
       parentRoute: typeof AuthRoute
+    }
+    '/api/team-colors': {
+      id: '/api/team-colors'
+      path: '/api/team-colors'
+      fullPath: '/api/team-colors'
+      preLoaderRoute: typeof ApiTeamColorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/markets': {
+      id: '/api/markets'
+      path: '/api/markets'
+      fullPath: '/api/markets'
+      preLoaderRoute: typeof ApiMarketsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/live-event-time': {
+      id: '/api/live-event-time'
+      path: '/api/live-event-time'
+      fullPath: '/api/live-event-time'
+      preLoaderRoute: typeof ApiLiveEventTimeRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_public/terms': {
       id: '/_public/terms'
@@ -183,12 +253,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PublicPrivacyRouteImport
       parentRoute: typeof PublicRoute
     }
-    '/_protected/dashboard': {
-      id: '/_protected/dashboard'
+    '/_public/dashboard': {
+      id: '/_public/dashboard'
       path: '/dashboard'
       fullPath: '/dashboard'
-      preLoaderRoute: typeof ProtectedDashboardRouteImport
-      parentRoute: typeof ProtectedRoute
+      preLoaderRoute: typeof PublicDashboardRouteImport
+      parentRoute: typeof PublicRoute
+    }
+    '/api/sync/polymarket': {
+      id: '/api/sync/polymarket'
+      path: '/api/sync/polymarket'
+      fullPath: '/api/sync/polymarket'
+      preLoaderRoute: typeof ApiSyncPolymarketRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/markets/$marketId': {
+      id: '/api/markets/$marketId'
+      path: '/$marketId'
+      fullPath: '/api/markets/$marketId'
+      preLoaderRoute: typeof ApiMarketsMarketIdRouteImport
+      parentRoute: typeof ApiMarketsRoute
     }
     '/api/auth/$': {
       id: '/api/auth/$'
@@ -200,25 +284,15 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface ProtectedRouteChildren {
-  ProtectedDashboardRoute: typeof ProtectedDashboardRoute
-}
-
-const ProtectedRouteChildren: ProtectedRouteChildren = {
-  ProtectedDashboardRoute: ProtectedDashboardRoute,
-}
-
-const ProtectedRouteWithChildren = ProtectedRoute._addFileChildren(
-  ProtectedRouteChildren,
-)
-
 interface PublicRouteChildren {
+  PublicDashboardRoute: typeof PublicDashboardRoute
   PublicPrivacyRoute: typeof PublicPrivacyRoute
   PublicTermsRoute: typeof PublicTermsRoute
   PublicIndexRoute: typeof PublicIndexRoute
 }
 
 const PublicRouteChildren: PublicRouteChildren = {
+  PublicDashboardRoute: PublicDashboardRoute,
   PublicPrivacyRoute: PublicPrivacyRoute,
   PublicTermsRoute: PublicTermsRoute,
   PublicIndexRoute: PublicIndexRoute,
@@ -237,11 +311,26 @@ const AuthRouteChildren: AuthRouteChildren = {
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
+interface ApiMarketsRouteChildren {
+  ApiMarketsMarketIdRoute: typeof ApiMarketsMarketIdRoute
+}
+
+const ApiMarketsRouteChildren: ApiMarketsRouteChildren = {
+  ApiMarketsMarketIdRoute: ApiMarketsMarketIdRoute,
+}
+
+const ApiMarketsRouteWithChildren = ApiMarketsRoute._addFileChildren(
+  ApiMarketsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
-  ProtectedRoute: ProtectedRouteWithChildren,
   PublicRoute: PublicRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
+  ApiLiveEventTimeRoute: ApiLiveEventTimeRoute,
+  ApiMarketsRoute: ApiMarketsRouteWithChildren,
+  ApiTeamColorsRoute: ApiTeamColorsRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiSyncPolymarketRoute: ApiSyncPolymarketRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
