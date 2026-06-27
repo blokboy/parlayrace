@@ -6,7 +6,7 @@ import {
   DialogTitle,
 } from '@starter/ui/components/shadcn/dialog';
 import { createFileRoute, redirect } from '@tanstack/react-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type PositionSide = 'home' | 'draw' | 'away';
 type BuySide = 'YES' | 'NO';
@@ -40,8 +40,25 @@ type TeamMember = {
 };
 
 type TeamCommittedLeg = {
+  id: string;
+  parlayId: string;
   positionId: string;
+  sequence: number;
+  addedByUserId: string;
+  addedByUsername: string;
   shares: number;
+  stake: number;
+  entryPrice: number;
+  marketId: string | null;
+  cardTitle: string;
+  optionLabel: string;
+  side: string;
+  kickoff: string;
+  homeTeam: string;
+  awayTeam: string;
+  positionSide: PositionSide;
+  buySide: BuySide;
+  placedAt: string;
 };
 
 type ParlayTeam = {
@@ -66,6 +83,21 @@ type MarketDetail = {
   yesPrice: number;
   noPrice: number;
   updatedAt: string | null;
+};
+
+type TeamLegLiveMetrics = {
+  currentPrice: number | null;
+  expectedPayoff: number | null;
+};
+
+type LiveStatus = {
+  statusLabel: string;
+  hasStarted: boolean;
+  isFinal: boolean;
+  eventTime: string | null;
+  homeScore: number | null;
+  awayScore: number | null;
+  scoreLabel: string | null;
 };
 
 const MAX_ADDITIONAL_MEMBERS = 9;
@@ -269,6 +301,13 @@ const PortfolioPage = () => {
   const [teamModalFeedback, setTeamModalFeedback] = useState<string | null>(
     null
   );
+  const [teamLegMetricsById, setTeamLegMetricsById] = useState<
+    Record<string, TeamLegLiveMetrics>
+  >({});
+  const [teamLegLiveStatusesById, setTeamLegLiveStatusesById] = useState<
+    Record<string, LiveStatus>
+  >({});
+  const teamLegLiveStatusesRef = useRef<Record<string, LiveStatus>>({});
   const [sellPosition, setSellPosition] = useState<PaperPosition | null>(null);
   const [sellDetail, setSellDetail] = useState<MarketDetail | null>(null);
   const [sellShares, setSellShares] = useState(0);
@@ -382,15 +421,10 @@ const PortfolioPage = () => {
         }
       >
     >((acc, team) => {
-      const totalStaked = team.committedLegs.reduce((sum, leg) => {
-        const position = positionsById.get(leg.positionId);
-        if (!position || position.quantity <= 0) {
-          return sum;
-        }
-
-        const stakePerShare = position.stake / position.quantity;
-        return sum + roundToCents(stakePerShare * leg.shares);
-      }, 0);
+      const totalStaked = team.committedLegs.reduce(
+        (sum, leg) => sum + leg.stake,
+        0
+      );
 
       const potentialPayout = roundToCents(
         team.committedLegs.reduce((sum, leg) => sum + leg.shares, 0)
@@ -415,14 +449,7 @@ const PortfolioPage = () => {
     );
     const teamKickoffKeys = new Set(
       selectedParlayTeam.committedLegs
-        .map((leg) => {
-          const position = positionsById.get(leg.positionId);
-          if (!position) {
-            return null;
-          }
-
-          return kickoffKey(position.kickoff);
-        })
+        .map((leg) => kickoffKey(leg.kickoff))
         .filter((value): value is string => Boolean(value))
     );
 
@@ -447,6 +474,146 @@ const PortfolioPage = () => {
       ) ?? null
     );
   }, [selectedTeamOpenPositions, selectedTeamPositionId]);
+
+  useEffect(() => {
+    teamLegLiveStatusesRef.current = teamLegLiveStatusesById;
+  }, [teamLegLiveStatusesById]);
+
+  useEffect(() => {
+    if (!selectedParlayTeam || selectedParlayTeam.committedLegs.length === 0) {
+      setTeamLegLiveStatusesById({});
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollLiveStatuses = async (legs: TeamCommittedLeg[]) => {
+      const response = await fetch('/api/live-event-time', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          events: legs.map((leg) => ({
+            marketId: leg.id,
+            matchup: leg.cardTitle,
+            kickoff: leg.kickoff,
+            homeTeam: leg.homeTeam,
+            awayTeam: leg.awayTeam,
+          })),
+        }),
+      });
+
+      if (!response.ok || cancelled) {
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        statuses?: Record<string, LiveStatus>;
+      };
+
+      if (!cancelled) {
+        setTeamLegLiveStatusesById(payload.statuses ?? {});
+      }
+    };
+
+    const pollIfNeeded = async () => {
+      const now = Date.now();
+      const legsForPolling = selectedParlayTeam.committedLegs.filter((leg) => {
+        const kickoffTime = new Date(leg.kickoff).getTime();
+        if (Number.isNaN(kickoffTime) || kickoffTime > now) {
+          return false;
+        }
+
+        const status = teamLegLiveStatusesRef.current[leg.id];
+        return !status?.isFinal;
+      });
+
+      if (legsForPolling.length === 0) {
+        return;
+      }
+
+      await pollLiveStatuses(legsForPolling);
+    };
+
+    void pollLiveStatuses(selectedParlayTeam.committedLegs);
+    const interval = setInterval(() => {
+      void pollIfNeeded();
+    }, 60000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [selectedParlayTeam]);
+
+  useEffect(() => {
+    if (!selectedParlayTeam || selectedParlayTeam.committedLegs.length === 0) {
+      setTeamLegMetricsById({});
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadLegMetrics = async () => {
+      const entries = await Promise.all(
+        selectedParlayTeam.committedLegs.map(async (leg) => {
+          if (!leg.marketId) {
+            return [
+              leg.id,
+              { currentPrice: null, expectedPayoff: null },
+            ] as const;
+          }
+
+          const query = new URLSearchParams({
+            side: leg.positionSide,
+            homeTeam: leg.homeTeam,
+            awayTeam: leg.awayTeam,
+          });
+
+          const response = await fetch(
+            `/api/markets/${leg.marketId}?${query.toString()}`,
+            {
+              method: 'GET',
+              headers: { Accept: 'application/json' },
+            }
+          );
+
+          if (!response.ok) {
+            return [
+              leg.id,
+              { currentPrice: null, expectedPayoff: null },
+            ] as const;
+          }
+
+          const detail = (await response.json()) as MarketDetail;
+          const currentPrice =
+            leg.buySide === 'NO' ? detail.noPrice : detail.yesPrice;
+
+          return [
+            leg.id,
+            {
+              currentPrice,
+              expectedPayoff: roundToCents(leg.shares * currentPrice),
+            },
+          ] as const;
+        })
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      setTeamLegMetricsById(Object.fromEntries(entries));
+    };
+
+    void loadLegMetrics();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedParlayTeam]);
 
   const createTeamFromModal = async () => {
     const name = teamName.trim();
@@ -640,11 +807,11 @@ const PortfolioPage = () => {
   };
 
   return (
-    <main className="dashboard-arcade landing-arcade relative min-h-screen overflow-hidden pt-16">
+    <main className="portfolio-arcade landing-arcade relative min-h-screen overflow-hidden pt-16">
       <div className="landing-arcade__glow" />
       <div className="landing-arcade__scanlines" />
 
-      <div className="dashboard-arcade__content relative z-10">
+      <div className="portfolio-arcade__content relative z-10">
         <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="mb-8 flex items-end justify-between gap-4">
             <div>
@@ -1091,28 +1258,70 @@ const PortfolioPage = () => {
               {selectedParlayTeam?.committedLegs.length ? (
                 <div className="mt-3 space-y-2">
                   {selectedParlayTeam.committedLegs.map((leg) => {
-                    const position = positionsById.get(leg.positionId);
-                    if (!position) {
-                      return null;
-                    }
-
-                    const stakePerShare =
-                      position.quantity > 0
-                        ? position.stake / position.quantity
-                        : 0;
+                    const metrics = teamLegMetricsById[leg.id];
 
                     return (
                       <div
                         key={`${selectedParlayTeam.id}-${leg.positionId}`}
                         className="rounded-md border border-gray-200 bg-white px-3 py-2"
                       >
-                        <p className="font-medium text-gray-900 text-sm">
-                          {position.matchup}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex rounded-full border border-blue-200 bg-white px-2 py-0.5 font-semibold text-[11px] text-blue-700">
+                            Leg {leg.sequence}
+                          </span>
+                          <span className="inline-flex rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-700">
+                            Added by {leg.addedByUsername}
+                          </span>
+                        </div>
+
+                        <p className="mt-2 font-medium text-gray-900 text-sm">
+                          {leg.cardTitle}
                         </p>
-                        <p className="mt-1 text-gray-600 text-xs">
-                          Shares {leg.shares.toFixed(2)} · Stake $
-                          {roundToCents(stakePerShare * leg.shares).toFixed(2)}
-                        </p>
+
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                          <span className="inline-flex rounded-full border border-green-200 bg-white px-2 py-0.5 font-medium text-green-700">
+                            {teamLegLiveStatusesById[leg.id]?.statusLabel ??
+                              'OPEN'}
+                          </span>
+                          <span className="text-gray-600">
+                            {teamLegLiveStatusesById[leg.id]?.scoreLabel
+                              ? `${teamLegLiveStatusesById[leg.id].scoreLabel} • ${teamLegLiveStatusesById[leg.id].eventTime ?? teamLegLiveStatusesById[leg.id].statusLabel}`
+                              : formatTradeTime(leg.kickoff)}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded border border-gray-200 bg-white px-2 py-1">
+                            <p className="text-gray-500">Shares</p>
+                            <p className="font-semibold text-gray-900">
+                              {leg.shares.toFixed(2)}
+                            </p>
+                          </div>
+                          <div className="rounded border border-gray-200 bg-white px-2 py-1">
+                            <p className="text-gray-500">Entry Price</p>
+                            <p className="font-semibold text-gray-900">
+                              ${leg.entryPrice.toFixed(2)}
+                            </p>
+                          </div>
+                          <div className="rounded border border-gray-200 bg-white px-2 py-1">
+                            <p className="text-gray-500">Current Price</p>
+                            <p className="font-semibold text-gray-900">
+                              {metrics?.currentPrice !== null &&
+                              metrics?.currentPrice !== undefined
+                                ? `$${metrics.currentPrice.toFixed(2)}`
+                                : '--'}
+                            </p>
+                          </div>
+                          <div className="rounded border border-gray-200 bg-white px-2 py-1">
+                            <p className="text-gray-500">Expected Payoff</p>
+                            <p className="font-semibold text-gray-900">
+                              {metrics?.expectedPayoff !== null &&
+                              metrics?.expectedPayoff !== undefined
+                                ? `$${metrics.expectedPayoff.toFixed(2)}`
+                                : '--'}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     );
                   })}

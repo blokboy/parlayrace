@@ -43,6 +43,11 @@ type ApiFootballFixture = {
   };
 };
 
+type MatchedFixture = {
+  fixture: ApiFootballFixture;
+  swapped: boolean;
+};
+
 const getFallbackStatus = (kickoffIso: string): LiveStatusPayload => {
   const kickoff = new Date(kickoffIso);
   if (Number.isNaN(kickoff.getTime())) {
@@ -128,7 +133,10 @@ const isSameTeam = (left: string, right: string): boolean => {
   return a === b || a.includes(b) || b.includes(a);
 };
 
-const toStatusPayload = (fixture: ApiFootballFixture): LiveStatusPayload => {
+const toStatusPayload = (
+  fixture: ApiFootballFixture,
+  swapped = false
+): LiveStatusPayload => {
   const short = fixture.fixture?.status?.short ?? '';
   const longStatus = fixture.fixture?.status?.long ?? '';
   const elapsed = fixture.fixture?.status?.elapsed;
@@ -136,9 +144,11 @@ const toStatusPayload = (fixture: ApiFootballFixture): LiveStatusPayload => {
     typeof fixture.goals?.home === 'number' ? fixture.goals.home : null;
   const awayScore =
     typeof fixture.goals?.away === 'number' ? fixture.goals.away : null;
+  const mappedHomeScore = swapped ? awayScore : homeScore;
+  const mappedAwayScore = swapped ? homeScore : awayScore;
   const scoreLabel =
-    homeScore !== null && awayScore !== null
-      ? `${homeScore}-${awayScore}`
+    mappedHomeScore !== null && mappedAwayScore !== null
+      ? `${mappedHomeScore}-${mappedAwayScore}`
       : null;
 
   const isFinal = ['FT', 'AET', 'PEN'].includes(short);
@@ -158,10 +168,37 @@ const toStatusPayload = (fixture: ApiFootballFixture): LiveStatusPayload => {
     hasStarted,
     isFinal,
     eventTime,
-    homeScore,
-    awayScore,
+    homeScore: mappedHomeScore,
+    awayScore: mappedAwayScore,
     scoreLabel,
   };
+};
+
+const findMatchingFixture = (
+  event: LiveEventRequest['events'][number],
+  fixtures: ApiFootballFixture[]
+): MatchedFixture | null => {
+  const direct = fixtures.find((fixture) => {
+    const home = fixture.teams?.home?.name ?? '';
+    const away = fixture.teams?.away?.name ?? '';
+    return isSameTeam(home, event.homeTeam) && isSameTeam(away, event.awayTeam);
+  });
+
+  if (direct) {
+    return { fixture: direct, swapped: false };
+  }
+
+  const swapped = fixtures.find((fixture) => {
+    const home = fixture.teams?.home?.name ?? '';
+    const away = fixture.teams?.away?.name ?? '';
+    return isSameTeam(home, event.awayTeam) && isSameTeam(away, event.homeTeam);
+  });
+
+  if (swapped) {
+    return { fixture: swapped, swapped: true };
+  }
+
+  return null;
 };
 
 export const Route = createFileRoute('/api/live-event-time')({
@@ -190,16 +227,50 @@ export const Route = createFileRoute('/api/live-event-time')({
         const uniqueDates = Array.from(
           new Set(
             events
-              .map((event) => {
+              .flatMap((event) => {
                 const kickoff = new Date(event.kickoff);
                 if (Number.isNaN(kickoff.getTime())) {
-                  return null;
+                  return [] as string[];
                 }
-                return kickoff.toISOString().slice(0, 10);
+                const date = new Date(
+                  Date.UTC(
+                    kickoff.getUTCFullYear(),
+                    kickoff.getUTCMonth(),
+                    kickoff.getUTCDate()
+                  )
+                );
+
+                const prev = new Date(date);
+                prev.setUTCDate(prev.getUTCDate() - 1);
+                const next = new Date(date);
+                next.setUTCDate(next.getUTCDate() + 1);
+
+                return [
+                  prev.toISOString().slice(0, 10),
+                  date.toISOString().slice(0, 10),
+                  next.toISOString().slice(0, 10),
+                ];
               })
               .filter((value): value is string => Boolean(value))
           )
         );
+
+        const liveResponse = await fetch(
+          'https://v3.football.api-sports.io/fixtures?live=all',
+          {
+            method: 'GET',
+            headers: {
+              'x-apisports-key': apiKey,
+              Accept: 'application/json',
+            },
+          }
+        );
+
+        const liveFixtures = liveResponse.ok
+          ? ((
+              (await liveResponse.json()) as { response?: ApiFootballFixture[] }
+            ).response ?? [])
+          : [];
 
         const fixtureResponses = await Promise.all(
           uniqueDates.map(async (date) => {
@@ -227,20 +298,14 @@ export const Route = createFileRoute('/api/live-event-time')({
         );
 
         const fixtures = fixtureResponses.flat();
+        const allFixtures = [...liveFixtures, ...fixtures];
 
         const statuses = events.reduce<Record<string, LiveStatusPayload>>(
           (acc, event) => {
-            const matchedFixture = fixtures.find((fixture) => {
-              const home = fixture.teams?.home?.name ?? '';
-              const away = fixture.teams?.away?.name ?? '';
-              return (
-                isSameTeam(home, event.homeTeam) &&
-                isSameTeam(away, event.awayTeam)
-              );
-            });
+            const matched = findMatchingFixture(event, allFixtures);
 
-            acc[event.marketId] = matchedFixture
-              ? toStatusPayload(matchedFixture)
+            acc[event.marketId] = matched
+              ? toStatusPayload(matched.fixture, matched.swapped)
               : fallbackStatuses[event.marketId];
 
             return acc;
