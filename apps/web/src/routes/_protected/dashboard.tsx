@@ -1,3 +1,10 @@
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@starter/ui/components/shadcn/dialog';
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -38,6 +45,25 @@ type MarketCard = {
   home: { name: string; logo: string; color: string | null };
   away: { name: string; logo: string; color: string | null };
   drawLeg: MarketLeg;
+};
+
+type SelectionSide = 'home' | 'draw' | 'away';
+
+type SelectedTrade = {
+  marketId: string;
+  matchup: string;
+  homeTeam: string;
+  awayTeam: string;
+  side: SelectionSide;
+  selectionLabel: string;
+};
+
+type MarketDetail = {
+  marketId: string;
+  question: string;
+  yesPrice: number;
+  noPrice: number;
+  updatedAt: string | null;
 };
 
 const normalizeHexColor = (input: string | null | undefined): string | null => {
@@ -213,17 +239,44 @@ const fetchTeamBranding = async (
   return payload.teams ?? {};
 };
 
+const fetchMarketDetail = async (
+  trade: SelectedTrade
+): Promise<MarketDetail | null> => {
+  const query = new URLSearchParams({
+    side: trade.side,
+    homeTeam: trade.homeTeam,
+    awayTeam: trade.awayTeam,
+  });
+
+  const response = await fetch(
+    `/api/markets/${trade.marketId}?${query.toString()}`,
+    {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json()) as MarketDetail;
+};
+
 const FlagButton = ({
   team,
   draw = false,
+  onClick,
 }: {
   team: { name: string; logo: string; color: string | null };
   draw?: boolean;
+  onClick?: () => void;
 }) => {
   if (draw) {
     return (
       <button
         type="button"
+        onClick={onClick}
         className="!bg-white hover:!bg-white w-full rounded-lg border border-violet-200 px-3 py-2 font-semibold text-sm text-violet-900 transition hover:border-violet-400 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         Draw
@@ -236,6 +289,7 @@ const FlagButton = ({
   return (
     <button
       type="button"
+      onClick={onClick}
       className="w-full rounded-lg border px-3 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
       style={{
         backgroundColor: palette.background,
@@ -263,6 +317,13 @@ const DashboardPage = () => {
     {}
   );
   const [liveStatuses, setLiveStatuses] = useState<Record<string, string>>({});
+  const [selectedTrade, setSelectedTrade] = useState<SelectedTrade | null>(
+    null
+  );
+  const [marketDetail, setMarketDetail] = useState<MarketDetail | null>(null);
+  const [stake, setStake] = useState(25);
+  const [pickSide, setPickSide] = useState<'YES' | 'NO'>('YES');
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -361,6 +422,59 @@ const DashboardPage = () => {
     };
   }, [marketCards]);
 
+  useEffect(() => {
+    if (!selectedTrade) {
+      setMarketDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadDetail = async () => {
+      setLoadingDetail(true);
+      const detail = await fetchMarketDetail(selectedTrade);
+      if (!cancelled) {
+        setMarketDetail(detail);
+        setLoadingDetail(false);
+      }
+    };
+
+    void loadDetail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTrade]);
+
+  const availableBalance = 1000;
+  const openPositions = 0;
+  const selectedPrice =
+    pickSide === 'YES'
+      ? (marketDetail?.yesPrice ?? 0)
+      : (marketDetail?.noPrice ?? 0);
+  const expectedMaxPayout =
+    selectedPrice > 0 ? Math.round((stake / selectedPrice) * 100) / 100 : 0;
+
+  const openTradeModal = (card: MarketCard, side: SelectionSide) => {
+    const selectionLabel =
+      side === 'home'
+        ? card.home.name
+        : side === 'away'
+          ? card.away.name
+          : 'Draw';
+
+    setSelectedTrade({
+      marketId: card.id,
+      matchup: card.matchup,
+      homeTeam: card.home.name,
+      awayTeam: card.away.name,
+      side,
+      selectionLabel,
+    });
+    setPickSide('YES');
+    setStake(25);
+  };
+
   return (
     <main className="dashboard-arcade landing-arcade relative min-h-screen overflow-hidden">
       <div className="landing-arcade__glow" />
@@ -395,12 +509,19 @@ const DashboardPage = () => {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <FlagButton team={card.home} />
+                  <FlagButton
+                    team={card.home}
+                    onClick={() => openTradeModal(card, 'home')}
+                  />
                   <FlagButton
                     team={card.home}
                     draw={true}
+                    onClick={() => openTradeModal(card, 'draw')}
                   />
-                  <FlagButton team={card.away} />
+                  <FlagButton
+                    team={card.away}
+                    onClick={() => openTradeModal(card, 'away')}
+                  />
                 </div>
               </div>
             ))}
@@ -412,6 +533,121 @@ const DashboardPage = () => {
           </div>
         )}
       </div>
+
+      <Dialog
+        open={selectedTrade !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedTrade(null);
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-md border-violet-200 bg-white"
+        >
+          <DialogHeader>
+            <DialogTitle className="text-violet-950">
+              {selectedTrade?.selectionLabel ?? 'Selection'}
+            </DialogTitle>
+            <p className="text-sm text-violet-800">
+              {selectedTrade ? selectedTrade.matchup : 'Loading selection...'}
+            </p>
+            <DialogClose
+              aria-label="Close trade modal"
+              className="absolute top-4 right-4 rounded-sm p-1 text-violet-700 transition hover:bg-violet-100"
+            >
+              x
+            </DialogClose>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <p className="text-sm text-violet-800">
+              Choose your side and paper stake for this selection.
+            </p>
+
+            <div className="grid grid-cols-4 gap-2">
+              {[25, 50, 75, 100].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() =>
+                    setStake(Math.round((availableBalance * value) / 100))
+                  }
+                  className="rounded-md border border-violet-200 bg-white px-3 py-1 font-semibold text-sm text-violet-900 transition hover:border-violet-300 hover:bg-violet-50"
+                >
+                  {value}%
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-violet-900">Stake (Paper)</p>
+                <p className="text-sm text-violet-900">
+                  ${stake} / ${availableBalance}
+                </p>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max={availableBalance}
+                step="1"
+                value={stake}
+                onChange={(event) => setStake(Number(event.target.value))}
+                className="w-full"
+              />
+            </div>
+
+            <p className="text-sm text-violet-700">
+              Available balance: ${availableBalance.toFixed(2)} · Open
+              positions: {openPositions}
+            </p>
+
+            <div className="space-y-3">
+              <p className="text-sm text-violet-900">Pick Side</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPickSide('YES')}
+                  className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
+                >
+                  YES{' '}
+                  {marketDetail ? `$${marketDetail.yesPrice.toFixed(2)}` : '--'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPickSide('NO')}
+                  className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
+                >
+                  NO{' '}
+                  {marketDetail ? `$${marketDetail.noPrice.toFixed(2)}` : '--'}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-violet-900">
+                  Expected Max Payout ({pickSide})
+                </p>
+                <p className="font-semibold text-sm text-violet-950">
+                  ${expectedMaxPayout.toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={loadingDetail || !marketDetail || selectedPrice <= 0}
+              className="w-full rounded-lg bg-violet-600 px-4 py-2 text-left font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="block">Confirm BUY {pickSide}</span>
+              <span className="block">
+                {marketDetail ? `$${selectedPrice.toFixed(2)}` : '--'}
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 };
