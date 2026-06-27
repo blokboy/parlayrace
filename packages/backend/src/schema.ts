@@ -243,6 +243,13 @@ export const parlayTeamParlay = pgTable('parlay_team_parlay', {
     .notNull()
     .references(() => userProfile.id, { onDelete: 'cascade' }),
   status: parlayStatus().notNull().default('ACTIVE'),
+  claimableAmount: real().notNull().default(0),
+  settledAmount: real().notNull().default(0),
+  settledAt: timestamp(),
+  transferredToUserId: text().references(() => userProfile.id, {
+    onDelete: 'set null',
+  }),
+  lossSequence: integer(),
   createdAt: timestamp().defaultNow().notNull(),
   updatedAt: timestamp()
     .defaultNow()
@@ -275,6 +282,32 @@ export const parlayTeamParlayShare = pgTable('parlay_team_parlay_share', {
   entryPrice: real().notNull(),
   createdAt: timestamp().defaultNow().notNull(),
 }).enableRLS();
+
+export const parlayTeamParlayClaim = pgTable(
+  'parlay_team_parlay_claim',
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => uuid()),
+    parlayId: text()
+      .notNull()
+      .references(() => parlayTeamParlay.id, { onDelete: 'cascade' }),
+    teamId: text()
+      .notNull()
+      .references(() => parlayTeam.id, { onDelete: 'cascade' }),
+    userId: text()
+      .notNull()
+      .references(() => userProfile.id, { onDelete: 'cascade' }),
+    amount: real().notNull(),
+    claimedAt: timestamp().defaultNow().notNull(),
+    createdAt: timestamp().defaultNow().notNull(),
+  },
+  (table) => ({
+    parlayUserUnique: uniqueIndex(
+      'parlay_team_parlay_claim_parlay_user_unique'
+    ).on(table.parlayId, table.userId),
+  })
+).enableRLS();
 
 export const providerSyncRun = pgTable('provider_sync_run', {
   id: text()

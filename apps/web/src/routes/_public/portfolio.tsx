@@ -59,6 +59,7 @@ type TeamCommittedLeg = {
   positionSide: PositionSide;
   buySide: BuySide;
   placedAt: string;
+  result: 'PENDING' | 'WON' | 'LOST';
 };
 
 type ParlayTeam = {
@@ -70,6 +71,12 @@ type ParlayTeam = {
   claimedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  status: 'ACTIVE' | 'LOST' | 'WON';
+  claimableAmount: number;
+  settledAmount: number;
+  canClaim: boolean;
+  hasClaimed: boolean;
+  claimAmount: number;
 };
 
 type SearchUser = {
@@ -127,6 +134,25 @@ const formatLiveSummary = (
   }
 
   return fallback;
+};
+
+const getLegBadgeClassName = (
+  leg: TeamCommittedLeg,
+  status: LiveStatus | undefined
+) => {
+  if (leg.result === 'WON') {
+    return 'border-green-200 text-green-700';
+  }
+
+  if (leg.result === 'LOST') {
+    return 'border-red-200 text-red-700';
+  }
+
+  if (status?.hasStarted) {
+    return 'border-violet-200 text-violet-700';
+  }
+
+  return 'border-blue-200 text-blue-700';
 };
 
 const MAX_ADDITIONAL_MEMBERS = 9;
@@ -253,6 +279,30 @@ const commitShareToParlayTeam = async (
       teamId,
       positionId,
       shares,
+    }),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as {
+    team?: ParlayTeam;
+  };
+
+  return payload.team ?? null;
+};
+
+const claimParlayTeam = async (teamId: string): Promise<ParlayTeam | null> => {
+  const response = await fetch('/api/parlay-teams', {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      action: 'claim',
+      teamId,
     }),
   });
 
@@ -749,6 +799,30 @@ const PortfolioPage = () => {
     setSelectedTeamPositionId('');
     setSharesToCommit(0);
     setTeamModalFeedback('Shares added to Parlay Team.');
+  };
+
+  const handleClaimParlayTeam = async () => {
+    if (!selectedParlayTeam?.canClaim || committingShare) {
+      return;
+    }
+
+    setCommittingShare(true);
+    setTeamModalFeedback(null);
+
+    const nextTeam = await claimParlayTeam(selectedParlayTeam.id);
+
+    setCommittingShare(false);
+
+    if (!nextTeam) {
+      setTeamModalFeedback('Unable to claim Parlay Team winnings.');
+      return;
+    }
+
+    setParlayTeams((current) =>
+      current.map((team) => (team.id === nextTeam.id ? nextTeam : team))
+    );
+    setSelectedParlayTeam(nextTeam);
+    setTeamModalFeedback(`Claimed $${nextTeam.claimAmount.toFixed(2)}.`);
   };
 
   const openSellModal = (position: PaperPosition) => {
@@ -1264,6 +1338,9 @@ const PortfolioPage = () => {
                       ?.potentialPayout ?? 0
                   ).toFixed(2)}
                 </span>
+                <span className="inline-flex rounded-full border border-violet-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-violet-800">
+                  {selectedParlayTeam?.status ?? 'ACTIVE'}
+                </span>
               </div>
               <p className="text-gray-600 text-sm">
                 {selectedParlayTeam?.members.length ?? 0} members
@@ -1285,71 +1362,74 @@ const PortfolioPage = () => {
                 Committed Legs
               </p>
               {selectedParlayTeam?.committedLegs.length ? (
-                <div className="mt-3 space-y-2">
+                <div className="mt-3 space-y-0">
                   {selectedParlayTeam.committedLegs.map((leg) => {
                     const metrics = teamLegMetricsById[leg.id];
+                    const liveStatus = teamLegLiveStatusesById[leg.id];
 
                     return (
                       <div
                         key={`${selectedParlayTeam.id}-${leg.positionId}`}
-                        className="rounded-md border border-gray-200 bg-white px-3 py-2"
+                        className="relative pl-8"
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="inline-flex rounded-full border border-blue-200 bg-white px-2 py-0.5 font-semibold text-[11px] text-blue-700">
-                            Leg {leg.sequence}
-                          </span>
-                          <span className="inline-flex rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-700">
-                            {leg.addedByUsername}
-                          </span>
-                        </div>
-
-                        <p className="mt-2 font-medium text-gray-900 text-sm">
-                          {leg.cardTitle}
-                        </p>
-
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                          <span className="inline-flex rounded-full border border-green-200 bg-white px-2 py-0.5 font-medium text-green-700">
-                            {teamLegLiveStatusesById[leg.id]?.statusLabel ??
-                              'OPEN'}
-                          </span>
-                          <span className="text-gray-600">
-                            {formatLiveSummary(
-                              teamLegLiveStatusesById[leg.id],
-                              formatTradeTime(leg.kickoff)
-                            )}
-                          </span>
-                        </div>
-
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                          <div className="rounded border border-gray-200 bg-white px-2 py-1">
-                            <p className="text-gray-500">Shares</p>
-                            <p className="font-semibold text-gray-900">
-                              {leg.shares.toFixed(2)}
-                            </p>
+                        <div className="absolute top-0 bottom-0 left-3 w-px bg-gray-200" />
+                        <div className="absolute top-4 left-[9px] h-3 w-3 rounded-full border border-white bg-violet-500" />
+                        <div className="rounded-md border border-gray-200 bg-white px-3 py-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`inline-flex rounded-full border bg-white px-2 py-0.5 font-semibold text-[11px] ${getLegBadgeClassName(leg, liveStatus)}`}
+                            >
+                              Leg {leg.sequence}
+                            </span>
+                            <span className="inline-flex rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-700">
+                              {leg.addedByUsername}
+                            </span>
                           </div>
-                          <div className="rounded border border-gray-200 bg-white px-2 py-1">
-                            <p className="text-gray-500">Entry Price</p>
-                            <p className="font-semibold text-gray-900">
-                              ${leg.entryPrice.toFixed(2)}
-                            </p>
+
+                          <p className="mt-2 font-medium text-gray-900 text-sm">
+                            {leg.cardTitle}
+                          </p>
+
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                            <span className="inline-flex rounded-full border border-green-200 bg-white px-2 py-0.5 font-medium text-green-700">
+                              {liveStatus?.statusLabel ?? 'OPEN'}
+                            </span>
+                            <span className="text-gray-600">
+                              {formatLiveSummary(liveStatus, formatTradeTime(leg.kickoff))}
+                            </span>
                           </div>
-                          <div className="rounded border border-gray-200 bg-white px-2 py-1">
-                            <p className="text-gray-500">Current Price</p>
-                            <p className="font-semibold text-gray-900">
-                              {metrics?.currentPrice !== null &&
-                              metrics?.currentPrice !== undefined
-                                ? `$${metrics.currentPrice.toFixed(2)}`
-                                : '--'}
-                            </p>
-                          </div>
-                          <div className="rounded border border-gray-200 bg-white px-2 py-1">
-                            <p className="text-gray-500">Expected Payoff</p>
-                            <p className="font-semibold text-gray-900">
-                              {metrics?.expectedPayoff !== null &&
-                              metrics?.expectedPayoff !== undefined
-                                ? `$${metrics.expectedPayoff.toFixed(2)}`
-                                : '--'}
-                            </p>
+
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                            <div className="rounded border border-gray-200 bg-white px-2 py-1">
+                              <p className="text-gray-500">Shares</p>
+                              <p className="font-semibold text-gray-900">
+                                {leg.shares.toFixed(2)}
+                              </p>
+                            </div>
+                            <div className="rounded border border-gray-200 bg-white px-2 py-1">
+                              <p className="text-gray-500">Entry Price</p>
+                              <p className="font-semibold text-gray-900">
+                                ${leg.entryPrice.toFixed(2)}
+                              </p>
+                            </div>
+                            <div className="rounded border border-gray-200 bg-white px-2 py-1">
+                              <p className="text-gray-500">Current Price</p>
+                              <p className="font-semibold text-gray-900">
+                                {metrics?.currentPrice !== null &&
+                                metrics?.currentPrice !== undefined
+                                  ? `$${metrics.currentPrice.toFixed(2)}`
+                                  : '--'}
+                              </p>
+                            </div>
+                            <div className="rounded border border-gray-200 bg-white px-2 py-1">
+                              <p className="text-gray-500">Expected Payoff</p>
+                              <p className="font-semibold text-gray-900">
+                                {metrics?.expectedPayoff !== null &&
+                                metrics?.expectedPayoff !== undefined
+                                  ? `$${metrics.expectedPayoff.toFixed(2)}`
+                                  : '--'}
+                              </p>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1361,6 +1441,21 @@ const PortfolioPage = () => {
                   No legs committed yet.
                 </p>
               )}
+
+              {selectedParlayTeam?.canClaim ? (
+                <button
+                  type="button"
+                  onClick={() => void handleClaimParlayTeam()}
+                  disabled={committingShare}
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Claim ${selectedParlayTeam.claimAmount.toFixed(2)}
+                </button>
+              ) : selectedParlayTeam?.hasClaimed ? (
+                <div className="mt-4 rounded-md border border-emerald-200 bg-white px-3 py-2 text-emerald-700 text-sm">
+                  Claimed ${selectedParlayTeam.claimAmount.toFixed(2)}.
+                </div>
+              ) : null}
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -1403,55 +1498,47 @@ const PortfolioPage = () => {
                   </p>
                 ) : null}
 
-                <div className="space-y-2">
-                  <div className="grid grid-cols-4 gap-2">
-                    {[25, 50, 75, 100].map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => {
-                          if (!selectedTeamPosition) {
-                            return;
-                          }
+                {selectedTeamPosition ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-4 gap-2">
+                      {[25, 50, 75, 100].map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => {
+                            setSharesToCommit(
+                              roundToCents(
+                                (selectedTeamPosition.quantity * value) / 100
+                              )
+                            );
+                          }}
+                          className="rounded-md border border-violet-200 bg-white px-3 py-1 font-semibold text-sm text-violet-900 transition hover:border-violet-300 hover:bg-violet-50"
+                        >
+                          {value}%
+                        </button>
+                      ))}
+                    </div>
 
-                          setSharesToCommit(
-                            roundToCents(
-                              (selectedTeamPosition.quantity * value) / 100
-                            )
-                          );
-                        }}
-                        disabled={!selectedTeamPosition}
-                        className="rounded-md border border-violet-200 bg-white px-3 py-1 font-semibold text-sm text-violet-900 transition hover:border-violet-300 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {value}%
-                      </button>
-                    ))}
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-violet-900">Shares to Add</p>
+                      <p className="text-sm text-violet-900">
+                        {sharesToCommit.toFixed(2)} /{' '}
+                        {selectedTeamPosition.quantity.toFixed(2)}
+                      </p>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max={Math.max(0, selectedTeamPosition.quantity)}
+                      step="0.01"
+                      value={sharesToCommit}
+                      onChange={(event) =>
+                        setSharesToCommit(Number(event.target.value))
+                      }
+                      className="w-full"
+                    />
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-violet-900">Shares to Add</p>
-                    <p className="text-sm text-violet-900">
-                      {sharesToCommit.toFixed(2)} /{' '}
-                      {selectedTeamPosition?.quantity.toFixed(2) ?? '0.00'}
-                    </p>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max={
-                      selectedTeamPosition
-                        ? Math.max(0, selectedTeamPosition.quantity)
-                        : 0
-                    }
-                    step="0.01"
-                    value={sharesToCommit}
-                    onChange={(event) =>
-                      setSharesToCommit(Number(event.target.value))
-                    }
-                    className="w-full"
-                    disabled={!selectedTeamPosition}
-                  />
-                </div>
+                ) : null}
 
                 {teamModalFeedback ? (
                   <div className="rounded-md border border-indigo-200 bg-white px-3 py-2 text-indigo-700 text-sm">
