@@ -1,61 +1,33 @@
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-} from '@starter/ui/components/shadcn/breadcrumb';
-import { Separator } from '@starter/ui/components/shadcn/separator';
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from '@starter/ui/components/shadcn/sidebar';
-import { createFileRoute, Outlet, redirect } from '@tanstack/react-router';
-import { AppSidebar } from '@/components/shared/layout/app-sidebar';
-import { UserProvider } from '@/contexts/user-context';
+import { createFileRoute, Link, Outlet } from '@tanstack/react-router';
 
 const ProtectedLayout = () => {
-  const { user } = Route.useLoaderData();
-
   return (
-    <UserProvider user={user}>
-      <SidebarProvider defaultOpen={true}>
-        <AppSidebar />
-        <SidebarInset>
-          <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 h-4"
-            />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Dashboard</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-          </header>
-          <div className="flex flex-1 flex-col gap-4 p-4">
-            <Outlet />
+    <>
+      <header className="fixed inset-x-0 top-0 z-50 bg-transparent landing-header">
+        <div className="landing-header__inner mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+          <Link
+            to="/"
+            className="landing-header-brand"
+          >
+            Parlayrace
+          </Link>
+          <div className="flex items-center gap-2">
+            <a
+              href="/dashboard?auth=1"
+              className="landing-header-button !text-white visited:!text-white hover:!text-white"
+            >
+              Get Started
+            </a>
           </div>
-        </SidebarInset>
-      </SidebarProvider>
-    </UserProvider>
+        </div>
+      </header>
+      <div className="pt-16 dashboard-arcade landing-arcade">
+        <Outlet />
+      </div>
+    </>
   );
 };
 
 export const Route = createFileRoute('/_protected')({
-  beforeLoad: ({ context }) => {
-    if (!context.user) {
-      throw redirect({ to: '/auth/login' });
-    }
-  },
-  loader: ({ context }) => {
-    if (!context.user) {
-      throw new Error('User not found in context after auth check');
-    }
-    return { user: context.user };
-  },
   component: ProtectedLayout,
 });
