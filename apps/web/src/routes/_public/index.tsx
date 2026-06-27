@@ -1,12 +1,3 @@
-/**
- * CUSTOMIZE: Landing page - replace this content with your own
- *
- * This page includes:
- * - SetupChecklist component (delete after setup is complete)
- * - Example feature cards (replace with your own content)
- * - Placeholder GitHub link (update to your repo)
- */
-
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 
 const LandingPage = () => {
