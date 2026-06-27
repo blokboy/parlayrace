@@ -1,3 +1,10 @@
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@starter/ui/components/shadcn/dialog';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -53,7 +60,16 @@ type SearchUser = {
   username: string;
 };
 
+type MarketDetail = {
+  marketId: string;
+  question: string;
+  yesPrice: number;
+  noPrice: number;
+  updatedAt: string | null;
+};
+
 const MAX_ADDITIONAL_MEMBERS = 9;
+const roundToCents = (value: number) => Math.round(value * 100) / 100;
 
 const defaultPortfolio = (): PaperPortfolioState => ({
   cash: 1000,
@@ -91,6 +107,45 @@ const fetchParlayTeams = async (): Promise<ParlayTeam[]> => {
   return payload.teams ?? [];
 };
 
+const savePortfolioStateForUser = async (
+  state: PaperPortfolioState
+): Promise<boolean> => {
+  const response = await fetch('/api/paper-portfolio', {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ state }),
+  });
+
+  return response.ok;
+};
+
+const fetchMarketDetail = async (
+  position: PaperPosition
+): Promise<MarketDetail | null> => {
+  const query = new URLSearchParams({
+    side: position.side,
+    homeTeam: position.homeTeam,
+    awayTeam: position.awayTeam,
+  });
+
+  const response = await fetch(
+    `/api/markets/${position.marketId}?${query.toString()}`,
+    {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json()) as MarketDetail;
+};
+
 const createParlayTeam = async (
   name: string,
   memberUsernames: string[],
@@ -107,6 +162,36 @@ const createParlayTeam = async (
       name,
       memberUsernames,
       captainUsername,
+    }),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as {
+    team?: ParlayTeam;
+  };
+
+  return payload.team ?? null;
+};
+
+const commitShareToParlayTeam = async (
+  teamId: string,
+  positionId: string,
+  shares: number
+): Promise<ParlayTeam | null> => {
+  const response = await fetch('/api/parlay-teams', {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      action: 'commit-share',
+      teamId,
+      positionId,
+      shares,
     }),
   });
 
@@ -152,6 +237,15 @@ const formatTradeTime = (value: string) => {
   }).format(parsed);
 };
 
+const kickoffKey = (value: string): string | null => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString().slice(0, 16);
+};
+
 const PortfolioPage = () => {
   const { username } = Route.useRouteContext();
   const [portfolioState, setPortfolioState] = useState<PaperPortfolioState>(
@@ -167,6 +261,19 @@ const PortfolioPage = () => {
   const [searchingMembers, setSearchingMembers] = useState(false);
   const [creatingTeam, setCreatingTeam] = useState(false);
   const [teamFeedback, setTeamFeedback] = useState<string | null>(null);
+  const [selectedParlayTeam, setSelectedParlayTeam] =
+    useState<ParlayTeam | null>(null);
+  const [selectedTeamPositionId, setSelectedTeamPositionId] = useState('');
+  const [sharesToCommit, setSharesToCommit] = useState(0);
+  const [committingShare, setCommittingShare] = useState(false);
+  const [teamModalFeedback, setTeamModalFeedback] = useState<string | null>(
+    null
+  );
+  const [sellPosition, setSellPosition] = useState<PaperPosition | null>(null);
+  const [sellDetail, setSellDetail] = useState<MarketDetail | null>(null);
+  const [sellShares, setSellShares] = useState(0);
+  const [loadingSellDetail, setLoadingSellDetail] = useState(false);
+  const [selling, setSelling] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -220,6 +327,31 @@ const PortfolioPage = () => {
     };
   }, [teamModalOpen, memberQuery]);
 
+  useEffect(() => {
+    if (!sellPosition) {
+      setSellDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadSellDetail = async () => {
+      setLoadingSellDetail(true);
+      const detail = await fetchMarketDetail(sellPosition);
+
+      if (!cancelled) {
+        setSellDetail(detail);
+        setLoadingSellDetail(false);
+      }
+    };
+
+    void loadSellDetail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sellPosition]);
+
   const openPositions = useMemo(
     () =>
       portfolioState.positions.filter((position) => position.status === 'OPEN'),
@@ -233,6 +365,88 @@ const PortfolioPage = () => {
       }, 0),
     [openPositions]
   );
+
+  const positionsById = useMemo(() => {
+    return new Map(
+      portfolioState.positions.map((position) => [position.id, position])
+    );
+  }, [portfolioState.positions]);
+
+  const teamMetricsById = useMemo(() => {
+    return parlayTeams.reduce<
+      Record<
+        string,
+        {
+          totalStaked: number;
+          potentialPayout: number;
+        }
+      >
+    >((acc, team) => {
+      const totalStaked = team.committedLegs.reduce((sum, leg) => {
+        const position = positionsById.get(leg.positionId);
+        if (!position || position.quantity <= 0) {
+          return sum;
+        }
+
+        const stakePerShare = position.stake / position.quantity;
+        return sum + roundToCents(stakePerShare * leg.shares);
+      }, 0);
+
+      const potentialPayout = roundToCents(
+        team.committedLegs.reduce((sum, leg) => sum + leg.shares, 0)
+      );
+
+      acc[team.id] = {
+        totalStaked,
+        potentialPayout,
+      };
+
+      return acc;
+    }, {});
+  }, [parlayTeams, positionsById]);
+
+  const selectedTeamOpenPositions = useMemo(() => {
+    if (!selectedParlayTeam) {
+      return [] as PaperPosition[];
+    }
+
+    const teamPositionIds = new Set(
+      selectedParlayTeam.committedLegs.map((leg) => leg.positionId)
+    );
+    const teamKickoffKeys = new Set(
+      selectedParlayTeam.committedLegs
+        .map((leg) => {
+          const position = positionsById.get(leg.positionId);
+          if (!position) {
+            return null;
+          }
+
+          return kickoffKey(position.kickoff);
+        })
+        .filter((value): value is string => Boolean(value))
+    );
+
+    return openPositions.filter((position) => {
+      if (teamPositionIds.has(position.id)) {
+        return false;
+      }
+
+      const positionKickoffKey = kickoffKey(position.kickoff);
+      if (!positionKickoffKey) {
+        return true;
+      }
+
+      return !teamKickoffKeys.has(positionKickoffKey);
+    });
+  }, [openPositions, positionsById, selectedParlayTeam]);
+
+  const selectedTeamPosition = useMemo(() => {
+    return (
+      selectedTeamOpenPositions.find(
+        (position) => position.id === selectedTeamPositionId
+      ) ?? null
+    );
+  }, [selectedTeamOpenPositions, selectedTeamPositionId]);
 
   const createTeamFromModal = async () => {
     const name = teamName.trim();
@@ -291,183 +505,347 @@ const PortfolioPage = () => {
     );
   };
 
+  const openParlayTeamModal = (team: ParlayTeam) => {
+    setSelectedParlayTeam(team);
+    setTeamModalFeedback(null);
+    setSelectedTeamPositionId('');
+    setSharesToCommit(0);
+  };
+
+  const handleCommitShareToTeam = async () => {
+    if (
+      !selectedParlayTeam ||
+      !selectedTeamPosition ||
+      sharesToCommit <= 0 ||
+      committingShare
+    ) {
+      return;
+    }
+
+    const clampedShares = roundToCents(
+      Math.min(sharesToCommit, selectedTeamPosition.quantity)
+    );
+
+    if (clampedShares <= 0) {
+      return;
+    }
+
+    setCommittingShare(true);
+    setTeamModalFeedback(null);
+
+    const nextTeam = await commitShareToParlayTeam(
+      selectedParlayTeam.id,
+      selectedTeamPosition.id,
+      clampedShares
+    );
+
+    setCommittingShare(false);
+
+    if (!nextTeam) {
+      setTeamModalFeedback('Unable to add shares to this Parlay Team.');
+      return;
+    }
+
+    setParlayTeams((current) =>
+      current.map((team) => (team.id === nextTeam.id ? nextTeam : team))
+    );
+    setSelectedParlayTeam(nextTeam);
+    setSelectedTeamPositionId('');
+    setSharesToCommit(0);
+    setTeamModalFeedback('Shares added to Parlay Team.');
+  };
+
+  const openSellModal = (position: PaperPosition) => {
+    setSellPosition(position);
+    setSellShares(roundToCents(position.quantity));
+  };
+
+  const selectedSellPrice =
+    sellPosition?.buySide === 'NO'
+      ? (sellDetail?.noPrice ?? 0)
+      : (sellDetail?.yesPrice ?? 0);
+
+  const expectedSellValue = roundToCents(sellShares * selectedSellPrice);
+
+  const handleConfirmSell = async () => {
+    if (
+      !sellPosition ||
+      !sellDetail ||
+      selectedSellPrice <= 0 ||
+      sellShares <= 0 ||
+      selling
+    ) {
+      return;
+    }
+
+    setSelling(true);
+
+    const effectiveSellShares = roundToCents(
+      Math.min(sellShares, sellPosition.quantity)
+    );
+
+    if (effectiveSellShares <= 0) {
+      setSelling(false);
+      return;
+    }
+
+    const proceeds = roundToCents(effectiveSellShares * selectedSellPrice);
+    const remainingShares = roundToCents(
+      sellPosition.quantity - effectiveSellShares
+    );
+
+    const nextPositions = portfolioState.positions.map((position) => {
+      if (position.id !== sellPosition.id) {
+        return position;
+      }
+
+      if (remainingShares <= 0) {
+        return {
+          ...position,
+          quantity: 0,
+          stake: 0,
+          status: 'CLOSED' as const,
+          closedAt: new Date().toISOString(),
+          closeValue: proceeds,
+        };
+      }
+
+      const ratio = remainingShares / position.quantity;
+
+      return {
+        ...position,
+        quantity: remainingShares,
+        stake: roundToCents(position.stake * ratio),
+      };
+    });
+
+    const nextState: PaperPortfolioState = {
+      cash: roundToCents(portfolioState.cash + proceeds),
+      positions: nextPositions,
+    };
+
+    const saved = await savePortfolioStateForUser(nextState);
+    setSelling(false);
+
+    if (!saved) {
+      setTeamFeedback('Unable to sell shares right now. Please try again.');
+      return;
+    }
+
+    setPortfolioState(nextState);
+    setSellPosition(null);
+    setSellDetail(null);
+    setSellShares(0);
+    setTeamFeedback('Position sold successfully.');
+  };
+
   return (
-    <main className="min-h-screen bg-white pt-16">
-      <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8 flex items-end justify-between gap-4">
-          <div>
-            <h1 className="font-bold text-3xl text-gray-900">Portfolio</h1>
-            <p className="mt-1 text-gray-600 text-sm">
-              Open paper trades for this user.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setTeamModalOpen(true);
-              setMemberQuery('');
-              setMemberResults([]);
-              setSelectedMembers([]);
-              setTeamFeedback(null);
-            }}
-            className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-blue-700"
-          >
-            Create Parlay Team
-          </button>
-        </div>
+    <main className="dashboard-arcade landing-arcade relative min-h-screen overflow-hidden pt-16">
+      <div className="landing-arcade__glow" />
+      <div className="landing-arcade__scanlines" />
 
-        {loading ? (
-          <div className="rounded-lg border border-gray-200 bg-white p-4 text-gray-600 text-sm">
-            Loading portfolio data
-          </div>
-        ) : (
-          <>
-            <div className="mb-6 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
-                <p className="text-gray-500 text-xs uppercase tracking-wide">
-                  Paper Balance
-                </p>
-                <p className="mt-1 font-semibold text-2xl text-gray-900">
-                  ${portfolioState.cash.toFixed(2)}
-                </p>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
-                <p className="text-gray-500 text-xs uppercase tracking-wide">
-                  Capital Deployed
-                </p>
-                <p className="mt-1 font-semibold text-2xl text-gray-900">
-                  ${deployedCapital.toFixed(2)}
-                </p>
-              </div>
+      <div className="dashboard-arcade__content relative z-10">
+        <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          <div className="mb-8 flex items-end justify-between gap-4">
+            <div>
+              <h1 className="font-bold text-3xl text-gray-900">Portfolio</h1>
+              <p className="mt-1 text-gray-600 text-sm">
+                Open paper trades for this user.
+              </p>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setTeamModalOpen(true);
+                setMemberQuery('');
+                setMemberResults([]);
+                setSelectedMembers([]);
+                setTeamFeedback(null);
+              }}
+              className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-blue-700"
+            >
+              Create Parlay Team
+            </button>
+          </div>
 
-            {teamFeedback ? (
-              <div className="mb-6 rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-indigo-700 text-sm">
-                {teamFeedback}
-              </div>
-            ) : null}
-
-            {openPositions.length === 0 ? (
-              <div className="rounded-lg border border-gray-300 border-dashed bg-white p-10 text-center text-gray-500">
-                No open paper trades yet.
-              </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {openPositions.map((position) => (
-                  <article
-                    key={position.id}
-                    className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
-                  >
-                    <h3 className="font-semibold text-base text-gray-900">
-                      {position.matchup}
-                    </h3>
-
-                    <div className="mt-3 space-y-2 text-sm">
-                      <div className="flex flex-wrap items-center gap-2 text-gray-700">
-                        <span className="font-semibold text-gray-900">
-                          {position.side === 'home'
-                            ? position.homeTeam
-                            : position.side === 'away'
-                              ? position.awayTeam
-                              : 'Draw'}
-                        </span>
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 font-semibold text-xs ${position.buySide === 'YES' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}
-                        >
-                          {position.buySide}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-lg border border-violet-100 bg-violet-50/60 p-2">
-                          <span className="inline-flex rounded-full bg-violet-200 px-2 py-0.5 font-semibold text-[10px] text-violet-800 uppercase tracking-wide">
-                            Stake
-                          </span>
-                          <p className="mt-1 font-semibold text-gray-900 text-sm">
-                            ${position.stake.toFixed(2)}
-                          </p>
-                        </div>
-                        <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-2">
-                          <span className="inline-flex rounded-full bg-amber-200 px-2 py-0.5 font-semibold text-[10px] text-amber-800 uppercase tracking-wide">
-                            Shares
-                          </span>
-                          <p className="mt-1 font-semibold text-gray-900 text-sm">
-                            {position.quantity.toFixed(2)}
-                          </p>
-                        </div>
-                        <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-2">
-                          <span className="inline-flex rounded-full bg-blue-200 px-2 py-0.5 font-semibold text-[10px] text-blue-800 uppercase tracking-wide">
-                            Entry Price
-                          </span>
-                          <p className="mt-1 font-semibold text-gray-900 text-sm">
-                            ${position.entryPrice.toFixed(2)}
-                          </p>
-                        </div>
-                        <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-2">
-                          <span className="inline-flex rounded-full bg-emerald-200 px-2 py-0.5 font-semibold text-[10px] text-emerald-800 uppercase tracking-wide">
-                            Potential Payout
-                          </span>
-                          <p className="mt-1 font-semibold text-gray-900 text-sm">
-                            ${position.quantity.toFixed(2)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 border-gray-100 border-t pt-3">
-                      <p className="text-gray-500 text-xs">
-                        Created {formatTradeTime(position.createdAt)}
-                      </p>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-
-            <div className="mt-8">
-              <h2 className="mb-3 font-semibold text-gray-500 text-sm uppercase tracking-wide">
-                Parlay Teams
-              </h2>
-              {parlayTeams.length === 0 ? (
-                <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-6">
-                  <h3 className="font-semibold text-slate-900 text-xl">
-                    No teams yet. Start a Parlay Team with your crew.
-                  </h3>
-                  <p className="mt-2 text-slate-700 text-sm leading-6">
-                    Use the Create Parlay Team button to set one up.
+          {loading ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 text-gray-600 text-sm">
+              Loading portfolio data
+            </div>
+          ) : (
+            <>
+              <div className="mb-6 grid gap-4 sm:grid-cols-2">
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <p className="text-gray-500 text-xs uppercase tracking-wide">
+                    Paper Balance
                   </p>
+                  <p className="mt-1 font-semibold text-2xl text-gray-900">
+                    ${portfolioState.cash.toFixed(2)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <p className="text-gray-500 text-xs uppercase tracking-wide">
+                    Capital Deployed
+                  </p>
+                  <p className="mt-1 font-semibold text-2xl text-gray-900">
+                    ${deployedCapital.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+
+              {teamFeedback ? (
+                <div className="mb-6 rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-indigo-700 text-sm">
+                  {teamFeedback}
+                </div>
+              ) : null}
+
+              {openPositions.length === 0 ? (
+                <div className="rounded-lg border border-gray-300 border-dashed bg-white p-10 text-center text-gray-500">
+                  No open paper trades yet.
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {parlayTeams.map((team) => (
+                  {openPositions.map((position) => (
                     <article
-                      key={team.id}
-                      className="rounded-2xl border border-gray-200 bg-white p-4"
+                      key={position.id}
+                      className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
                     >
                       <h3 className="font-semibold text-base text-gray-900">
-                        {team.name}
+                        {position.matchup}
                       </h3>
-                      <p className="mt-1 text-gray-500 text-sm">
-                        {team.members.length} member
-                        {team.members.length === 1 ? '' : 's'}
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {team.members.slice(0, 3).map((member) => (
-                          <span
-                            key={`${team.id}-${member.id}`}
-                            className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-gray-700 text-xs"
-                          >
-                            {member.username}
+
+                      <div className="mt-3 space-y-2 text-sm">
+                        <div className="flex flex-wrap items-center gap-2 text-gray-700">
+                          <span className="font-semibold text-gray-900">
+                            {position.side === 'home'
+                              ? position.homeTeam
+                              : position.side === 'away'
+                                ? position.awayTeam
+                                : 'Draw'}
                           </span>
-                        ))}
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 font-semibold text-xs ${position.buySide === 'YES' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}
+                          >
+                            {position.buySide}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-lg border border-violet-100 bg-violet-50/60 p-2">
+                            <span className="inline-flex rounded-full bg-violet-200 px-2 py-0.5 font-semibold text-[10px] text-violet-800 uppercase tracking-wide">
+                              Stake
+                            </span>
+                            <p className="mt-1 font-semibold text-gray-900 text-sm">
+                              ${position.stake.toFixed(2)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-2">
+                            <span className="inline-flex rounded-full bg-amber-200 px-2 py-0.5 font-semibold text-[10px] text-amber-800 uppercase tracking-wide">
+                              Shares
+                            </span>
+                            <p className="mt-1 font-semibold text-gray-900 text-sm">
+                              {position.quantity.toFixed(2)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-2">
+                            <span className="inline-flex rounded-full bg-blue-200 px-2 py-0.5 font-semibold text-[10px] text-blue-800 uppercase tracking-wide">
+                              Entry Price
+                            </span>
+                            <p className="mt-1 font-semibold text-gray-900 text-sm">
+                              ${position.entryPrice.toFixed(2)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-2">
+                            <span className="inline-flex rounded-full bg-emerald-200 px-2 py-0.5 font-semibold text-[10px] text-emerald-800 uppercase tracking-wide">
+                              Potential Payout
+                            </span>
+                            <p className="mt-1 font-semibold text-gray-900 text-sm">
+                              ${position.quantity.toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 border-gray-100 border-t pt-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-gray-500 text-xs">
+                            Created {formatTradeTime(position.createdAt)}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => openSellModal(position)}
+                            className="rounded-md bg-violet-600 px-3 py-1.5 font-semibold text-sm text-white transition hover:bg-violet-700"
+                          >
+                            SELL
+                          </button>
+                        </div>
                       </div>
                     </article>
                   ))}
                 </div>
               )}
-            </div>
-          </>
-        )}
+
+              <div className="mt-8">
+                <h2 className="mb-3 font-semibold text-gray-500 text-sm uppercase tracking-wide">
+                  Parlay Teams
+                </h2>
+                {parlayTeams.length === 0 ? (
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-6">
+                    <h3 className="font-semibold text-slate-900 text-xl">
+                      No teams yet. Start a Parlay Team with your crew.
+                    </h3>
+                    <p className="mt-2 text-slate-700 text-sm leading-6">
+                      Use the Create Parlay Team button to set one up.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {parlayTeams.map((team) => (
+                      <button
+                        key={team.id}
+                        type="button"
+                        onClick={() => openParlayTeamModal(team)}
+                        className="rounded-2xl border border-gray-200 bg-white p-4 text-left transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                      >
+                        <h3 className="font-semibold text-base text-gray-900">
+                          {team.name}
+                        </h3>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-[11px] text-amber-800">
+                            Stake $
+                            {(
+                              teamMetricsById[team.id]?.totalStaked ?? 0
+                            ).toFixed(2)}
+                          </span>
+                          <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-[11px] text-emerald-800">
+                            Potential Payout $
+                            {(
+                              teamMetricsById[team.id]?.potentialPayout ?? 0
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-gray-500 text-sm">
+                          {team.members.length} member
+                          {team.members.length === 1 ? '' : 's'}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {team.members.slice(0, 3).map((member) => (
+                            <span
+                              key={`${team.id}-${member.id}`}
+                              className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-gray-700 text-xs"
+                            >
+                              {member.username}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {teamModalOpen ? (
@@ -641,6 +1019,334 @@ const PortfolioPage = () => {
           </div>
         </div>
       ) : null}
+
+      <Dialog
+        open={selectedParlayTeam !== null}
+        onOpenChange={(open) => {
+          if (!open && !committingShare) {
+            setSelectedParlayTeam(null);
+            setSelectedTeamPositionId('');
+            setSharesToCommit(0);
+            setTeamModalFeedback(null);
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-xl border-violet-200 bg-white"
+        >
+          <DialogHeader>
+            <DialogTitle className="text-violet-950">
+              {selectedParlayTeam?.name ?? 'Parlay Team'}
+            </DialogTitle>
+            <p className="text-sm text-violet-800">
+              View team details and add shares from your open positions.
+            </p>
+            <DialogClose
+              aria-label="Close parlay team modal"
+              className="absolute top-4 right-4 rounded-sm p-1 text-violet-700 transition hover:bg-violet-100"
+              disabled={committingShare}
+            >
+              x
+            </DialogClose>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="mb-2 flex flex-wrap gap-2">
+                <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-[11px] text-amber-800">
+                  Stake $
+                  {(
+                    teamMetricsById[selectedParlayTeam?.id ?? '']
+                      ?.totalStaked ?? 0
+                  ).toFixed(2)}
+                </span>
+                <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-[11px] text-emerald-800">
+                  Potential Payout $
+                  {(
+                    teamMetricsById[selectedParlayTeam?.id ?? '']
+                      ?.potentialPayout ?? 0
+                  ).toFixed(2)}
+                </span>
+              </div>
+              <p className="text-gray-600 text-sm">
+                {selectedParlayTeam?.members.length ?? 0} members
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {(selectedParlayTeam?.members ?? []).map((member) => (
+                  <span
+                    key={member.id}
+                    className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-gray-700 text-xs"
+                  >
+                    {member.username}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <p className="font-semibold text-gray-900 text-sm">
+                Committed Legs
+              </p>
+              {selectedParlayTeam?.committedLegs.length ? (
+                <div className="mt-3 space-y-2">
+                  {selectedParlayTeam.committedLegs.map((leg) => {
+                    const position = positionsById.get(leg.positionId);
+                    if (!position) {
+                      return null;
+                    }
+
+                    const stakePerShare =
+                      position.quantity > 0
+                        ? position.stake / position.quantity
+                        : 0;
+
+                    return (
+                      <div
+                        key={`${selectedParlayTeam.id}-${leg.positionId}`}
+                        className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2"
+                      >
+                        <p className="font-medium text-gray-900 text-sm">
+                          {position.matchup}
+                        </p>
+                        <p className="mt-1 text-gray-600 text-xs">
+                          Shares {leg.shares.toFixed(2)} · Stake $
+                          {roundToCents(stakePerShare * leg.shares).toFixed(2)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-2 text-gray-500 text-sm">
+                  No legs committed yet.
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <p className="font-semibold text-gray-900 text-sm">
+                Add Shares from Portfolio
+              </p>
+
+              <div className="mt-3 space-y-3">
+                <select
+                  value={selectedTeamPositionId}
+                  onChange={(event) => {
+                    const positionId = event.target.value;
+                    setSelectedTeamPositionId(positionId);
+
+                    const position = selectedTeamOpenPositions.find(
+                      (entry) => entry.id === positionId
+                    );
+                    setSharesToCommit(
+                      position ? roundToCents(position.quantity) : 0
+                    );
+                  }}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                >
+                  <option value="">Select an open position</option>
+                  {selectedTeamOpenPositions.map((position) => (
+                    <option
+                      key={position.id}
+                      value={position.id}
+                    >
+                      {position.matchup} · {position.side.toUpperCase()} ·{' '}
+                      {position.quantity.toFixed(2)} shares
+                    </option>
+                  ))}
+                </select>
+
+                {selectedTeamOpenPositions.length === 0 ? (
+                  <p className="text-gray-500 text-xs">
+                    No eligible positions available. Legs with conflicting start
+                    times cannot be added to this Parlay Team.
+                  </p>
+                ) : null}
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-violet-900">Shares to Add</p>
+                    <p className="text-sm text-violet-900">
+                      {sharesToCommit.toFixed(2)} /{' '}
+                      {selectedTeamPosition?.quantity.toFixed(2) ?? '0.00'}
+                    </p>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={
+                      selectedTeamPosition
+                        ? Math.max(0, selectedTeamPosition.quantity)
+                        : 0
+                    }
+                    step="0.01"
+                    value={sharesToCommit}
+                    onChange={(event) =>
+                      setSharesToCommit(Number(event.target.value))
+                    }
+                    className="w-full"
+                    disabled={!selectedTeamPosition}
+                  />
+                </div>
+
+                {teamModalFeedback ? (
+                  <div className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-indigo-700 text-sm">
+                    {teamModalFeedback}
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={() => void handleCommitShareToTeam()}
+                  disabled={
+                    !selectedTeamPosition ||
+                    sharesToCommit <= 0 ||
+                    committingShare
+                  }
+                  className="inline-flex w-full items-center justify-center rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {committingShare
+                    ? 'Adding Shares...'
+                    : 'Add Shares to Parlay Team'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={sellPosition !== null}
+        onOpenChange={(open) => {
+          if (!open && !selling) {
+            setSellPosition(null);
+            setSellDetail(null);
+            setSellShares(0);
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-md border-violet-200 bg-white"
+        >
+          <DialogHeader>
+            <DialogTitle className="text-violet-950">
+              {sellPosition?.side === 'home'
+                ? sellPosition.homeTeam
+                : sellPosition?.side === 'away'
+                  ? sellPosition.awayTeam
+                  : 'Draw'}
+            </DialogTitle>
+            <p className="text-sm text-violet-800">
+              {sellPosition ? sellPosition.matchup : 'Loading selection...'}
+            </p>
+            <DialogClose
+              aria-label="Close trade modal"
+              className="absolute top-4 right-4 rounded-sm p-1 text-violet-700 transition hover:bg-violet-100"
+              disabled={selling}
+            >
+              x
+            </DialogClose>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <p className="text-sm text-violet-800">
+              Choose how many shares to sell from this position.
+            </p>
+
+            <div className="grid grid-cols-4 gap-2">
+              {[25, 50, 75, 100].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    if (!sellPosition) {
+                      return;
+                    }
+
+                    setSellShares(
+                      roundToCents((sellPosition.quantity * value) / 100)
+                    );
+                  }}
+                  className="rounded-md border border-violet-200 bg-white px-3 py-1 font-semibold text-sm text-violet-900 transition hover:border-violet-300 hover:bg-violet-50"
+                >
+                  {value}%
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-violet-900">Shares to Sell</p>
+                <p className="text-sm text-violet-900">
+                  {sellShares.toFixed(2)} /{' '}
+                  {sellPosition?.quantity.toFixed(2) ?? '0.00'}
+                </p>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max={sellPosition ? Math.max(0, sellPosition.quantity) : 0}
+                step="0.01"
+                value={sellShares}
+                onChange={(event) => setSellShares(Number(event.target.value))}
+                className="w-full"
+              />
+            </div>
+
+            <p className="text-sm text-violet-700">
+              Current market price ({sellPosition?.buySide ?? '--'}):{' '}
+              {sellDetail ? `$${selectedSellPrice.toFixed(2)}` : '--'}
+            </p>
+
+            <div className="space-y-3">
+              <p className="text-sm text-violet-900">Sell Side</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled
+                  className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${sellPosition?.buySide === 'YES' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-violet-200 bg-white text-violet-900'}`}
+                >
+                  YES {sellDetail ? `$${sellDetail.yesPrice.toFixed(2)}` : '--'}
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${sellPosition?.buySide === 'NO' ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-violet-200 bg-white text-violet-900'}`}
+                >
+                  NO {sellDetail ? `$${sellDetail.noPrice.toFixed(2)}` : '--'}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-violet-900">Expected Proceeds</p>
+                <p className="font-semibold text-sm text-violet-950">
+                  ${expectedSellValue.toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={
+                loadingSellDetail ||
+                selling ||
+                !sellDetail ||
+                selectedSellPrice <= 0 ||
+                sellShares <= 0
+              }
+              onClick={() => void handleConfirmSell()}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span>Confirm SELL {sellPosition?.buySide ?? '--'}</span>
+              <span>
+                {sellDetail ? `$${selectedSellPrice.toFixed(2)}` : '--'}
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 };

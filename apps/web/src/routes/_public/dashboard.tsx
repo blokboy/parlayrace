@@ -6,7 +6,7 @@ import {
   DialogTitle,
 } from '@starter/ui/components/shadcn/dialog';
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type MarketLeg = {
   id: string;
@@ -65,6 +65,16 @@ type MarketDetail = {
   yesPrice: number;
   noPrice: number;
   updatedAt: string | null;
+};
+
+type LiveStatus = {
+  statusLabel: string;
+  hasStarted: boolean;
+  isFinal: boolean;
+  eventTime: string | null;
+  homeScore: number | null;
+  awayScore: number | null;
+  scoreLabel: string | null;
 };
 
 type PaperPosition = {
@@ -382,7 +392,10 @@ const DashboardPage = () => {
   const [teamBrands, setTeamBrands] = useState<Record<string, TeamBranding>>(
     {}
   );
-  const [liveStatuses, setLiveStatuses] = useState<Record<string, string>>({});
+  const [liveStatuses, setLiveStatuses] = useState<Record<string, LiveStatus>>(
+    {}
+  );
+  const liveStatusesRef = useRef<Record<string, LiveStatus>>({});
   const [selectedTrade, setSelectedTrade] = useState<SelectedTrade | null>(
     null
   );
@@ -453,13 +466,17 @@ const DashboardPage = () => {
   }, [markets, teamBrands, userTimeZone]);
 
   useEffect(() => {
+    liveStatusesRef.current = liveStatuses;
+  }, [liveStatuses]);
+
+  useEffect(() => {
     if (marketCards.length === 0) {
       return;
     }
 
     let cancelled = false;
 
-    const pollLiveStatuses = async () => {
+    const pollLiveStatuses = async (cards: MarketCard[]) => {
       const response = await fetch('/api/live-event-time', {
         method: 'POST',
         headers: {
@@ -467,9 +484,12 @@ const DashboardPage = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          events: marketCards.map((card) => ({
+          events: cards.map((card) => ({
+            marketId: card.id,
             matchup: card.matchup,
             kickoff: card.kickoffIso,
+            homeTeam: card.home.name,
+            awayTeam: card.away.name,
           })),
         }),
       });
@@ -479,7 +499,7 @@ const DashboardPage = () => {
       }
 
       const payload = (await response.json()) as {
-        statuses?: Record<string, string>;
+        statuses?: Record<string, LiveStatus>;
       };
 
       if (!cancelled) {
@@ -487,10 +507,29 @@ const DashboardPage = () => {
       }
     };
 
-    void pollLiveStatuses();
+    const pollIfNeeded = async () => {
+      const now = Date.now();
+      const activeCards = marketCards.filter((card) => {
+        const kickoffTime = new Date(card.kickoffIso).getTime();
+        if (Number.isNaN(kickoffTime) || kickoffTime > now) {
+          return false;
+        }
+
+        const status = liveStatusesRef.current[card.id];
+        return !status?.isFinal;
+      });
+
+      if (activeCards.length === 0) {
+        return;
+      }
+
+      await pollLiveStatuses(activeCards);
+    };
+
+    void pollIfNeeded();
     const interval = setInterval(() => {
-      void pollLiveStatuses();
-    }, 30000);
+      void pollIfNeeded();
+    }, 60000);
 
     return () => {
       cancelled = true;
@@ -654,12 +693,14 @@ const DashboardPage = () => {
                     {card.matchup}
                   </h3>
                   <span className="inline-block rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-xs">
-                    {liveStatuses[card.matchup] ?? 'OPEN'}
+                    {liveStatuses[card.id]?.statusLabel ?? 'OPEN'}
                   </span>
                 </div>
 
                 <div className="mb-4 flex items-center gap-2 text-violet-800/80 text-xs">
-                  {card.kickoff}
+                  {liveStatuses[card.id]?.scoreLabel
+                    ? `${liveStatuses[card.id].scoreLabel} • ${liveStatuses[card.id].eventTime ?? liveStatuses[card.id].statusLabel}`
+                    : card.kickoff}
                 </div>
 
                 <div className="flex flex-col gap-2">

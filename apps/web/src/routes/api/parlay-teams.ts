@@ -1,5 +1,11 @@
 import { auth } from '@starter/backend/auth';
+import { db } from '@starter/backend/db';
 import { createFileRoute } from '@tanstack/react-router';
+
+type PaperPosition = {
+  id: string;
+  kickoff: string;
+};
 
 type TeamMember = {
   id: string;
@@ -41,6 +47,15 @@ const getSessionUser = async (request: Request) => {
 
 const nowIso = () => new Date().toISOString();
 const MAX_ADDITIONAL_MEMBERS = 9;
+
+const kickoffKey = (value: string): string | null => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString().slice(0, 16);
+};
 
 export const Route = createFileRoute('/api/parlay-teams')({
   server: {
@@ -173,6 +188,69 @@ export const Route = createFileRoute('/api/parlay-teams')({
           ) {
             return Response.json(
               { ok: false, error: 'INVALID_COMMIT' },
+              { status: 400 }
+            );
+          }
+
+          const portfolioRow = await db.query.paperPortfolio.findFirst({
+            where: (table, { eq }) => eq(table.userId, user.id),
+            columns: {
+              positions: true,
+            },
+          });
+
+          const positions = Array.isArray(portfolioRow?.positions)
+            ? (portfolioRow.positions as PaperPosition[])
+            : [];
+
+          const positionById = new Map(
+            positions.map((position) => [position.id, position])
+          );
+
+          const targetPosition = positionById.get(body.positionId);
+          if (!targetPosition) {
+            return Response.json(
+              {
+                ok: false,
+                error: 'POSITION_NOT_FOUND',
+              },
+              { status: 400 }
+            );
+          }
+
+          const targetKickoffKey = kickoffKey(targetPosition.kickoff);
+          if (!targetKickoffKey) {
+            return Response.json(
+              {
+                ok: false,
+                error: 'INVALID_POSITION_KICKOFF',
+              },
+              { status: 400 }
+            );
+          }
+
+          const hasKickoffConflict = team.committedLegs.some((leg) => {
+            if (leg.positionId === body.positionId) {
+              return false;
+            }
+
+            const existingPosition = positionById.get(leg.positionId);
+            if (!existingPosition) {
+              return false;
+            }
+
+            const existingKickoffKey = kickoffKey(existingPosition.kickoff);
+            return existingKickoffKey === targetKickoffKey;
+          });
+
+          if (hasKickoffConflict) {
+            return Response.json(
+              {
+                ok: false,
+                error: 'CONFLICTING_START_TIME',
+                message:
+                  'Cannot add a leg with a conflicting start time to this Parlay Team.',
+              },
               { status: 400 }
             );
           }
