@@ -1,8 +1,11 @@
 @import "@starter/ui/base.css";
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Sora:wght@500;600;700&display=swap');
 
 @source "../";
 
 :root {
+  --font-landing: 'Plus Jakarta Sans', 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-landing-title: 'Sora', 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
   --background: oklch(0.985 0.002 95);
   --foreground: oklch(0.25 0.02 50);
   --card: oklch(1 0 0);
@@ -58,4 +61,114 @@
   --sidebar-accent-foreground: oklch(0.95 0.005 90);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.55 0.1 180);
+}
+
+.landing-arcade {
+  background:
+    radial-gradient(circle at 10% 10%, rgba(196, 181, 253, 0.48), transparent 36%),
+    radial-gradient(circle at 92% 14%, rgba(232, 225, 255, 0.9), transparent 42%),
+    radial-gradient(circle at 48% 92%, rgba(233, 213, 255, 0.42), transparent 48%),
+    linear-gradient(180deg, #ffffff 0%, #f7f4ff 45%, #f1ebff 100%);
+}
+
+.landing-arcade,
+.landing-arcade *,
+.landing-header,
+.landing-header * {
+  font-family: var(--font-landing);
+}
+
+.landing-arcade__glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 16% 22%, rgba(196, 181, 253, 0.36), transparent 38%),
+    radial-gradient(circle at 78% 24%, rgba(216, 180, 254, 0.28), transparent 44%),
+    radial-gradient(circle at 50% 90%, rgba(221, 214, 254, 0.3), transparent 52%);
+}
+
+.landing-arcade__scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.32;
+  background-image:
+    linear-gradient(rgba(139, 92, 246, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(168, 85, 247, 0.03) 1px, transparent 1px);
+  background-size: 28px 28px, 28px 28px;
+}
+
+.landing-header {
+  border-bottom: 0;
+  backdrop-filter: none;
+}
+
+.landing-header__inner {
+  position: relative;
+}
+
+.landing-header-brand {
+  font-family: var(--font-landing-title);
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #3b0764;
+}
+
+.landing-panel,
+.landing-feature-card {
+  border: 1px solid rgba(196, 181, 253, 0.62);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(250, 247, 255, 0.92));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.85) inset,
+    0 20px 48px rgba(124, 58, 237, 0.12);
+}
+
+.landing-kicker {
+  font-family: var(--font-landing);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #6d28d9;
+}
+
+.landing-title {
+  font-family: var(--font-landing-title);
+  letter-spacing: -0.03em;
+}
+
+.landing-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.landing-feature-card {
+  padding: 0.9rem;
+  border-color: rgba(196, 181, 253, 0.6);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 243, 255, 0.9));
+}
+
+.landing-feature-title {
+  margin: 0;
+  font-family: var(--font-landing-title);
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: #312e81;
+}
+
+.landing-feature-body {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #5b6185;
+}
+
+@media (min-width: 640px) {
+  .landing-feature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
