@@ -38,8 +38,18 @@ type ApiFootballFixture = {
     away?: { name?: string };
   };
   goals?: {
-    home?: number | null;
-    away?: number | null;
+    home?: number | string | null;
+    away?: number | string | null;
+  };
+  score?: {
+    halftime?: {
+      home?: number | string | null;
+      away?: number | string | null;
+    };
+    fulltime?: {
+      home?: number | string | null;
+      away?: number | string | null;
+    };
   };
 };
 
@@ -133,6 +143,19 @@ const isSameTeam = (left: string, right: string): boolean => {
   return a === b || a.includes(b) || b.includes(a);
 };
 
+const toNullableScore = (value: number | string | null | undefined) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
 const toStatusPayload = (
   fixture: ApiFootballFixture,
   swapped = false
@@ -141,9 +164,13 @@ const toStatusPayload = (
   const longStatus = fixture.fixture?.status?.long ?? '';
   const elapsed = fixture.fixture?.status?.elapsed;
   const homeScore =
-    typeof fixture.goals?.home === 'number' ? fixture.goals.home : null;
+    toNullableScore(fixture.goals?.home) ??
+    toNullableScore(fixture.score?.fulltime?.home) ??
+    toNullableScore(fixture.score?.halftime?.home);
   const awayScore =
-    typeof fixture.goals?.away === 'number' ? fixture.goals.away : null;
+    toNullableScore(fixture.goals?.away) ??
+    toNullableScore(fixture.score?.fulltime?.away) ??
+    toNullableScore(fixture.score?.halftime?.away);
   const mappedHomeScore = swapped ? awayScore : homeScore;
   const mappedAwayScore = swapped ? homeScore : awayScore;
   const scoreLabel =

@@ -77,6 +77,35 @@ type LiveStatus = {
   scoreLabel: string | null;
 };
 
+const formatLiveSummary = (
+  status: LiveStatus | undefined,
+  fallback: string
+): string => {
+  if (!status) {
+    return fallback;
+  }
+
+  const scoreLabel =
+    status.scoreLabel ??
+    (status.homeScore !== null && status.awayScore !== null
+      ? `${status.homeScore}-${status.awayScore}`
+      : null);
+
+  if (scoreLabel && (status.eventTime ?? status.statusLabel)) {
+    return `${scoreLabel} • ${status.eventTime ?? status.statusLabel}`;
+  }
+
+  if (scoreLabel) {
+    return scoreLabel;
+  }
+
+  if (status.eventTime ?? status.statusLabel) {
+    return status.eventTime ?? status.statusLabel;
+  }
+
+  return fallback;
+};
+
 type PaperPosition = {
   id: string;
   marketId: string;
@@ -698,9 +727,7 @@ const DashboardPage = () => {
                 </div>
 
                 <div className="mb-4 flex items-center gap-2 text-violet-800/80 text-xs">
-                  {liveStatuses[card.id]?.scoreLabel
-                    ? `${liveStatuses[card.id].scoreLabel} • ${liveStatuses[card.id].eventTime ?? liveStatuses[card.id].statusLabel}`
-                    : card.kickoff}
+                  {formatLiveSummary(liveStatuses[card.id], card.kickoff)}
                 </div>
 
                 <div className="flex flex-col gap-2">

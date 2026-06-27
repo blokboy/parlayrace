@@ -100,6 +100,35 @@ type LiveStatus = {
   scoreLabel: string | null;
 };
 
+const formatLiveSummary = (
+  status: LiveStatus | undefined,
+  fallback: string
+): string => {
+  if (!status) {
+    return fallback;
+  }
+
+  const scoreLabel =
+    status.scoreLabel ??
+    (status.homeScore !== null && status.awayScore !== null
+      ? `${status.homeScore}-${status.awayScore}`
+      : null);
+
+  if (scoreLabel && (status.eventTime ?? status.statusLabel)) {
+    return `${scoreLabel} • ${status.eventTime ?? status.statusLabel}`;
+  }
+
+  if (scoreLabel) {
+    return scoreLabel;
+  }
+
+  if (status.eventTime ?? status.statusLabel) {
+    return status.eventTime ?? status.statusLabel;
+  }
+
+  return fallback;
+};
+
 const MAX_ADDITIONAL_MEMBERS = 9;
 const roundToCents = (value: number) => Math.round(value * 100) / 100;
 
@@ -1270,7 +1299,7 @@ const PortfolioPage = () => {
                             Leg {leg.sequence}
                           </span>
                           <span className="inline-flex rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-700">
-                            Added by {leg.addedByUsername}
+                            {leg.addedByUsername}
                           </span>
                         </div>
 
@@ -1284,9 +1313,10 @@ const PortfolioPage = () => {
                               'OPEN'}
                           </span>
                           <span className="text-gray-600">
-                            {teamLegLiveStatusesById[leg.id]?.scoreLabel
-                              ? `${teamLegLiveStatusesById[leg.id].scoreLabel} • ${teamLegLiveStatusesById[leg.id].eventTime ?? teamLegLiveStatusesById[leg.id].statusLabel}`
-                              : formatTradeTime(leg.kickoff)}
+                            {formatLiveSummary(
+                              teamLegLiveStatusesById[leg.id],
+                              formatTradeTime(leg.kickoff)
+                            )}
                           </span>
                         </div>
 
@@ -1374,6 +1404,30 @@ const PortfolioPage = () => {
                 ) : null}
 
                 <div className="space-y-2">
+                  <div className="grid grid-cols-4 gap-2">
+                    {[25, 50, 75, 100].map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => {
+                          if (!selectedTeamPosition) {
+                            return;
+                          }
+
+                          setSharesToCommit(
+                            roundToCents(
+                              (selectedTeamPosition.quantity * value) / 100
+                            )
+                          );
+                        }}
+                        disabled={!selectedTeamPosition}
+                        className="rounded-md border border-violet-200 bg-white px-3 py-1 font-semibold text-sm text-violet-900 transition hover:border-violet-300 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {value}%
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-violet-900">Shares to Add</p>
                     <p className="text-sm text-violet-900">
