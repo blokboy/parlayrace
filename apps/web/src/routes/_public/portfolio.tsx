@@ -694,7 +694,7 @@ const PortfolioPage = () => {
               </div>
 
               {teamFeedback ? (
-                <div className="mb-6 rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-indigo-700 text-sm">
+                <div className="mb-6 rounded-lg border border-indigo-200 bg-white p-4 text-indigo-700 text-sm">
                   {teamFeedback}
                 </div>
               ) : null}
@@ -724,39 +724,39 @@ const PortfolioPage = () => {
                                 : 'Draw'}
                           </span>
                           <span
-                            className={`inline-flex rounded-full px-2.5 py-1 font-semibold text-xs ${position.buySide === 'YES' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}
+                            className={`inline-flex rounded-full border px-2.5 py-1 font-semibold text-xs ${position.buySide === 'YES' ? 'border-emerald-200 bg-white text-emerald-700' : 'border-rose-200 bg-white text-rose-700'}`}
                           >
                             {position.buySide}
                           </span>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
-                          <div className="rounded-lg border border-violet-100 bg-violet-50/60 p-2">
-                            <span className="inline-flex rounded-full bg-violet-200 px-2 py-0.5 font-semibold text-[10px] text-violet-800 uppercase tracking-wide">
+                          <div className="rounded-lg border border-violet-100 bg-white p-2">
+                            <span className="inline-flex rounded-full border border-violet-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-violet-800 uppercase tracking-wide">
                               Stake
                             </span>
                             <p className="mt-1 font-semibold text-gray-900 text-sm">
                               ${position.stake.toFixed(2)}
                             </p>
                           </div>
-                          <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-2">
-                            <span className="inline-flex rounded-full bg-amber-200 px-2 py-0.5 font-semibold text-[10px] text-amber-800 uppercase tracking-wide">
+                          <div className="rounded-lg border border-amber-100 bg-white p-2">
+                            <span className="inline-flex rounded-full border border-amber-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-amber-800 uppercase tracking-wide">
                               Shares
                             </span>
                             <p className="mt-1 font-semibold text-gray-900 text-sm">
                               {position.quantity.toFixed(2)}
                             </p>
                           </div>
-                          <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-2">
-                            <span className="inline-flex rounded-full bg-blue-200 px-2 py-0.5 font-semibold text-[10px] text-blue-800 uppercase tracking-wide">
+                          <div className="rounded-lg border border-blue-100 bg-white p-2">
+                            <span className="inline-flex rounded-full border border-blue-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-blue-800 uppercase tracking-wide">
                               Entry Price
                             </span>
                             <p className="mt-1 font-semibold text-gray-900 text-sm">
                               ${position.entryPrice.toFixed(2)}
                             </p>
                           </div>
-                          <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-2">
-                            <span className="inline-flex rounded-full bg-emerald-200 px-2 py-0.5 font-semibold text-[10px] text-emerald-800 uppercase tracking-wide">
+                          <div className="rounded-lg border border-emerald-100 bg-white p-2">
+                            <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-emerald-800 uppercase tracking-wide">
                               Potential Payout
                             </span>
                             <p className="mt-1 font-semibold text-gray-900 text-sm">
@@ -790,7 +790,7 @@ const PortfolioPage = () => {
                   Parlay Teams
                 </h2>
                 {parlayTeams.length === 0 ? (
-                  <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-6">
+                  <div className="rounded-2xl border border-blue-200 bg-white p-6">
                     <h3 className="font-semibold text-slate-900 text-xl">
                       No teams yet. Start a Parlay Team with your crew.
                     </h3>
@@ -811,13 +811,13 @@ const PortfolioPage = () => {
                           {team.name}
                         </h3>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-[11px] text-amber-800">
+                          <span className="inline-flex rounded-full border border-amber-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-amber-800">
                             Stake $
                             {(
                               teamMetricsById[team.id]?.totalStaked ?? 0
                             ).toFixed(2)}
                           </span>
-                          <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-[11px] text-emerald-800">
+                          <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-emerald-800">
                             Potential Payout $
                             {(
                               teamMetricsById[team.id]?.potentialPayout ?? 0
@@ -927,7 +927,7 @@ const PortfolioPage = () => {
                     {selectedMembers.map((member) => (
                       <span
                         key={member.id}
-                        className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-blue-700 text-xs"
+                        className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white px-2.5 py-1 text-blue-700 text-xs"
                       >
                         {member.username}
                         <button
@@ -947,7 +947,7 @@ const PortfolioPage = () => {
                 <p className="font-medium text-gray-700 text-sm">
                   Search Results
                 </p>
-                <div className="mt-2 max-h-52 space-y-2 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-2">
+                <div className="mt-2 max-h-52 space-y-2 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2">
                   {searchingMembers ? (
                     <p className="text-gray-500 text-xs">
                       Searching usernames...
@@ -1054,14 +1054,14 @@ const PortfolioPage = () => {
           <div className="space-y-4">
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="mb-2 flex flex-wrap gap-2">
-                <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-[11px] text-amber-800">
+                <span className="inline-flex rounded-full border border-amber-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-amber-800">
                   Stake $
                   {(
                     teamMetricsById[selectedParlayTeam?.id ?? '']
                       ?.totalStaked ?? 0
                   ).toFixed(2)}
                 </span>
-                <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-[11px] text-emerald-800">
+                <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-emerald-800">
                   Potential Payout $
                   {(
                     teamMetricsById[selectedParlayTeam?.id ?? '']
@@ -1104,7 +1104,7 @@ const PortfolioPage = () => {
                     return (
                       <div
                         key={`${selectedParlayTeam.id}-${leg.positionId}`}
-                        className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2"
+                        className="rounded-md border border-gray-200 bg-white px-3 py-2"
                       >
                         <p className="font-medium text-gray-900 text-sm">
                           {position.matchup}
@@ -1191,7 +1191,7 @@ const PortfolioPage = () => {
                 </div>
 
                 {teamModalFeedback ? (
-                  <div className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-indigo-700 text-sm">
+                  <div className="rounded-md border border-indigo-200 bg-white px-3 py-2 text-indigo-700 text-sm">
                     {teamModalFeedback}
                   </div>
                 ) : null}
@@ -1295,38 +1295,6 @@ const PortfolioPage = () => {
               />
             </div>
 
-            <p className="text-sm text-violet-700">
-              Current market price ({sellPosition?.buySide ?? '--'}):{' '}
-              {sellDetail ? `$${selectedSellPrice.toFixed(2)}` : '--'}
-            </p>
-
-            <div className="space-y-3">
-              <p className="text-sm text-violet-900">Sell Side</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled
-                  className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${sellPosition?.buySide === 'YES' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-violet-200 bg-white text-violet-900'}`}
-                >
-                  YES {sellDetail ? `$${sellDetail.yesPrice.toFixed(2)}` : '--'}
-                </button>
-                <button
-                  type="button"
-                  disabled
-                  className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${sellPosition?.buySide === 'NO' ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-violet-200 bg-white text-violet-900'}`}
-                >
-                  NO {sellDetail ? `$${sellDetail.noPrice.toFixed(2)}` : '--'}
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-violet-900">Expected Proceeds</p>
-                <p className="font-semibold text-sm text-violet-950">
-                  ${expectedSellValue.toFixed(2)}
-                </p>
-              </div>
-            </div>
-
             <button
               type="button"
               disabled={
@@ -1339,11 +1307,23 @@ const PortfolioPage = () => {
               onClick={() => void handleConfirmSell()}
               className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <span>Confirm SELL {sellPosition?.buySide ?? '--'}</span>
+              <span>Confirm SELL</span>
               <span>
                 {sellDetail ? `$${selectedSellPrice.toFixed(2)}` : '--'}
               </span>
             </button>
+
+            <p className="text-sm text-violet-700">
+              Current market price ({sellPosition?.buySide ?? '--'}):{' '}
+              {sellDetail ? `$${selectedSellPrice.toFixed(2)}` : '--'}
+            </p>
+
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-violet-900">Expected Proceeds</p>
+              <p className="font-semibold text-sm text-violet-950">
+                ${expectedSellValue.toFixed(2)}
+              </p>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
