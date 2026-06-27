@@ -365,84 +365,88 @@ const fetchLiveStatuses = async (
     return fallbackStatuses;
   }
 
-  const uniqueDates = Array.from(
-    new Set(
-      events.flatMap((event) => {
-        const kickoff = new Date(event.kickoff);
-        if (Number.isNaN(kickoff.getTime())) {
-          return [] as string[];
-        }
+  try {
+    const uniqueDates = Array.from(
+      new Set(
+        events.flatMap((event) => {
+          const kickoff = new Date(event.kickoff);
+          if (Number.isNaN(kickoff.getTime())) {
+            return [] as string[];
+          }
 
-        const base = new Date(
-          Date.UTC(
-            kickoff.getUTCFullYear(),
-            kickoff.getUTCMonth(),
-            kickoff.getUTCDate()
-          )
-        );
-        const prev = new Date(base);
-        prev.setUTCDate(prev.getUTCDate() - 1);
-        const next = new Date(base);
-        next.setUTCDate(next.getUTCDate() + 1);
+          const base = new Date(
+            Date.UTC(
+              kickoff.getUTCFullYear(),
+              kickoff.getUTCMonth(),
+              kickoff.getUTCDate()
+            )
+          );
+          const prev = new Date(base);
+          prev.setUTCDate(prev.getUTCDate() - 1);
+          const next = new Date(base);
+          next.setUTCDate(next.getUTCDate() + 1);
 
-        return [
-          prev.toISOString().slice(0, 10),
-          base.toISOString().slice(0, 10),
-          next.toISOString().slice(0, 10),
-        ];
-      })
-    )
-  );
+          return [
+            prev.toISOString().slice(0, 10),
+            base.toISOString().slice(0, 10),
+            next.toISOString().slice(0, 10),
+          ];
+        })
+      )
+    );
 
-  const liveResponse = await fetch(
-    'https://v3.football.api-sports.io/fixtures?live=all',
-    {
-      method: 'GET',
-      headers: {
-        'x-apisports-key': apiKey,
-        Accept: 'application/json',
-      },
-    }
-  );
-
-  const liveFixtures = liveResponse.ok
-    ? (((await liveResponse.json()) as { response?: ApiFootballFixture[] })
-        .response ?? [])
-    : [];
-
-  const datedFixtures = await Promise.all(
-    uniqueDates.map(async (date) => {
-      const response = await fetch(
-        `https://v3.football.api-sports.io/fixtures?date=${date}`,
-        {
-          method: 'GET',
-          headers: {
-            'x-apisports-key': apiKey,
-            Accept: 'application/json',
-          },
-        }
-      );
-
-      if (!response.ok) {
-        return [] as ApiFootballFixture[];
+    const liveResponse = await fetch(
+      'https://v3.football.api-sports.io/fixtures?live=all',
+      {
+        method: 'GET',
+        headers: {
+          'x-apisports-key': apiKey,
+          Accept: 'application/json',
+        },
       }
+    );
 
-      const payload = (await response.json()) as {
-        response?: ApiFootballFixture[];
-      };
-      return payload.response ?? [];
-    })
-  );
+    const liveFixtures = liveResponse.ok
+      ? (((await liveResponse.json()) as { response?: ApiFootballFixture[] })
+          .response ?? [])
+      : [];
 
-  const fixtures = [...liveFixtures, ...datedFixtures.flat()];
+    const datedFixtures = await Promise.all(
+      uniqueDates.map(async (date) => {
+        const response = await fetch(
+          `https://v3.football.api-sports.io/fixtures?date=${date}`,
+          {
+            method: 'GET',
+            headers: {
+              'x-apisports-key': apiKey,
+              Accept: 'application/json',
+            },
+          }
+        );
 
-  return events.reduce<Record<string, LiveStatusPayload>>((acc, event) => {
-    const matched = findMatchingFixture(event, fixtures);
-    acc[event.marketId] = matched
-      ? toStatusPayload(matched.fixture, matched.swapped)
-      : fallbackStatuses[event.marketId];
-    return acc;
-  }, {});
+        if (!response.ok) {
+          return [] as ApiFootballFixture[];
+        }
+
+        const payload = (await response.json()) as {
+          response?: ApiFootballFixture[];
+        };
+        return payload.response ?? [];
+      })
+    );
+
+    const fixtures = [...liveFixtures, ...datedFixtures.flat()];
+
+    return events.reduce<Record<string, LiveStatusPayload>>((acc, event) => {
+      const matched = findMatchingFixture(event, fixtures);
+      acc[event.marketId] = matched
+        ? toStatusPayload(matched.fixture, matched.swapped)
+        : fallbackStatuses[event.marketId];
+      return acc;
+    }, {});
+  } catch {
+    return fallbackStatuses;
+  }
 };
 
 const creditUserCash = async (userId: string, amount: number) => {
@@ -740,7 +744,11 @@ const buildTeamResponses = async (
     return [];
   }
 
-  await syncParlayStates(teamIds);
+  try {
+    await syncParlayStates(teamIds);
+  } catch {
+    // ignore live sync failures and still return team payloads
+  }
 
   const [teams, members, parlays, shares, claims] = await Promise.all([
     db.query.parlayTeam.findMany({
