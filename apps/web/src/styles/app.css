@@ -118,10 +118,6 @@ input:disabled {
 .landing-header {
   border-bottom: 0;
   backdrop-filter: none;
-  background:
-    radial-gradient(circle at 10% 10%, rgba(196, 181, 253, 0.48), transparent 36%),
-    radial-gradient(circle at 92% 14%, rgba(232, 225, 255, 0.9), transparent 42%),
-    linear-gradient(180deg, #ffffff 0%, #f7f4ff 100%);
 }
 
 .landing-header__inner {
