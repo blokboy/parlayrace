@@ -3,8 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 
 type TeamMember = {
   id: string;
-  name: string;
-  email: string;
+  username: string;
 };
 
 type TeamCommittedLeg = {
@@ -41,6 +40,7 @@ const getSessionUser = async (request: Request) => {
 };
 
 const nowIso = () => new Date().toISOString();
+const MAX_ADDITIONAL_MEMBERS = 9;
 
 export const Route = createFileRoute('/api/parlay-teams')({
   server: {
@@ -71,6 +71,8 @@ export const Route = createFileRoute('/api/parlay-teams')({
         const body = (await request.json().catch(() => ({}))) as {
           action?: string;
           name?: string;
+          memberUsernames?: string[];
+          captainUsername?: string;
         };
 
         if (body.action !== 'create' || !body.name?.trim()) {
@@ -82,17 +84,46 @@ export const Route = createFileRoute('/api/parlay-teams')({
 
         const store = getStore();
         const teams = store.get(user.id) ?? [];
+        const uniqueMemberUsernames = Array.from(
+          new Set(
+            (body.memberUsernames ?? [])
+              .map((entry) => entry.trim())
+              .filter(Boolean)
+          )
+        );
+
+        if (uniqueMemberUsernames.length > MAX_ADDITIONAL_MEMBERS) {
+          return Response.json(
+            {
+              ok: false,
+              error: 'MAX_MEMBERS_EXCEEDED',
+              message: 'A team can include up to 10 members total.',
+            },
+            { status: 400 }
+          );
+        }
+
+        const captainUsername =
+          body.captainUsername?.trim() || user.name || user.email.split('@')[0];
+
+        const members: TeamMember[] = [
+          {
+            id: user.id,
+            username: captainUsername,
+          },
+          ...uniqueMemberUsernames.map((username) => ({
+            id: `u-${username}`,
+            username,
+          })),
+        ];
+
         const team: ParlayTeam = {
           id: crypto.randomUUID(),
           name: body.name.trim(),
           captainUserId: user.id,
-          members: [
-            {
-              id: user.id,
-              name: user.name ?? 'Captain',
-              email: user.email,
-            },
-          ],
+          members: Array.from(
+            new Map(members.map((member) => [member.id, member])).values()
+          ),
           committedLegs: [],
           claimedAt: null,
           createdAt: nowIso(),

@@ -1,10 +1,10 @@
 import { auth } from '@starter/backend/auth';
+import { db } from '@starter/backend/db';
 import { createFileRoute } from '@tanstack/react-router';
 
 type SearchUser = {
   id: string;
-  name: string;
-  email: string;
+  username: string;
 };
 
 const getSessionUser = async (request: Request) => {
@@ -13,10 +13,10 @@ const getSessionUser = async (request: Request) => {
 };
 
 const staticUsers: SearchUser[] = [
-  { id: 'u-amy', name: 'Amy Chen', email: 'amy@example.com' },
-  { id: 'u-mateo', name: 'Mateo Silva', email: 'mateo@example.com' },
-  { id: 'u-nora', name: 'Nora Patel', email: 'nora@example.com' },
-  { id: 'u-jules', name: 'Jules Park', email: 'jules@example.com' },
+  { id: 'u-amy', username: 'amy_chen' },
+  { id: 'u-mateo', username: 'mateo_silva' },
+  { id: 'u-nora', username: 'nora_patel' },
+  { id: 'u-jules', username: 'jules_park' },
 ];
 
 export const Route = createFileRoute('/api/users')({
@@ -35,14 +35,24 @@ export const Route = createFileRoute('/api/users')({
         const url = new URL(request.url);
         const query = (url.searchParams.get('q') ?? '').trim().toLowerCase();
 
-        const fullSet: SearchUser[] = [
-          {
-            id: user.id,
-            name: user.name ?? 'You',
-            email: user.email,
+        const profileRows = await db.query.userProfile.findMany({
+          columns: {
+            id: true,
+            username: true,
           },
-          ...staticUsers,
-        ];
+          limit: 100,
+        });
+
+        const dbUsers: SearchUser[] = profileRows
+          .filter((entry): entry is { id: string; username: string } => {
+            return Boolean(entry.username);
+          })
+          .map((entry) => ({
+            id: entry.id,
+            username: entry.username,
+          }));
+
+        const fullSet: SearchUser[] = [...dbUsers, ...staticUsers];
 
         const deduped = Array.from(
           new Map(fullSet.map((entry) => [entry.id, entry])).values()
@@ -50,10 +60,7 @@ export const Route = createFileRoute('/api/users')({
 
         const users = query
           ? deduped.filter((entry) => {
-              return (
-                entry.name.toLowerCase().includes(query) ||
-                entry.email.toLowerCase().includes(query)
-              );
+              return entry.username.toLowerCase().includes(query);
             })
           : deduped.slice(0, 8);
 
