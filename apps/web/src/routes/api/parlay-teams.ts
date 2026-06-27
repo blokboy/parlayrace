@@ -1251,6 +1251,31 @@ export const Route = createFileRoute('/api/parlay-teams')({
               ),
           });
 
+          if (existingShares.length > 0) {
+            const firstShare = [...existingShares].sort(
+              (a, b) => a.sequence - b.sequence
+            )[0];
+            const firstPosition = positionById.get(firstShare.positionId);
+            const firstKickoffMs = firstPosition
+              ? new Date(firstPosition.kickoff).getTime()
+              : Number.NaN;
+
+            if (
+              Number.isFinite(firstKickoffMs) &&
+              firstKickoffMs <= Date.now()
+            ) {
+              return Response.json(
+                {
+                  ok: false,
+                  error: 'PARLAY_LOCKED_STARTED',
+                  message:
+                    'Cannot add legs once the first parlay leg has started.',
+                },
+                { status: 400 }
+              );
+            }
+          }
+
           const alreadyCommittedByUserForPosition = roundToCents(
             existingShares
               .filter(

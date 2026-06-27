@@ -107,6 +107,62 @@ type LiveStatus = {
   scoreLabel: string | null;
 };
 
+type TeamBranding = {
+  name: string;
+  logo: string;
+  color: string | null;
+};
+
+const countryCodeByName: Record<string, string> = {
+  argentina: 'AR',
+  australia: 'AU',
+  belgium: 'BE',
+  brazil: 'BR',
+  cameroon: 'CM',
+  canada: 'CA',
+  croatia: 'HR',
+  denmark: 'DK',
+  ecuador: 'EC',
+  england: 'GB',
+  france: 'FR',
+  germany: 'DE',
+  ghana: 'GH',
+  iran: 'IR',
+  japan: 'JP',
+  mexico: 'MX',
+  morocco: 'MA',
+  netherlands: 'NL',
+  panama: 'PA',
+  poland: 'PL',
+  portugal: 'PT',
+  qatar: 'QA',
+  'saudi arabia': 'SA',
+  senegal: 'SN',
+  serbia: 'RS',
+  'south korea': 'KR',
+  'korea republic': 'KR',
+  spain: 'ES',
+  switzerland: 'CH',
+  tunisia: 'TN',
+  'united states': 'US',
+  usa: 'US',
+  uruguay: 'UY',
+  wales: 'GB',
+};
+
+const countryNameToFlag = (name: string): string => {
+  const code = countryCodeByName[name.trim().toLowerCase()];
+  if (!code || code.length !== 2) {
+    return '';
+  }
+
+  return code
+    .toUpperCase()
+    .split('')
+    .map((char) => String.fromCodePoint(127397 + char.charCodeAt(0)))
+    .join('');
+};
+
 const formatLiveSummary = (
   status: LiveStatus | undefined,
   fallback: string
@@ -115,25 +171,27 @@ const formatLiveSummary = (
     return fallback;
   }
 
-  const scoreLabel =
-    status.scoreLabel ??
-    (status.homeScore !== null && status.awayScore !== null
-      ? `${status.homeScore}-${status.awayScore}`
-      : null);
-
-  if (scoreLabel && (status.eventTime ?? status.statusLabel)) {
-    return `${scoreLabel} • ${status.eventTime ?? status.statusLabel}`;
-  }
-
-  if (scoreLabel) {
-    return scoreLabel;
-  }
-
   if (status.eventTime ?? status.statusLabel) {
     return status.eventTime ?? status.statusLabel;
   }
 
   return fallback;
+};
+
+const getLiveBadgeLabel = (status: LiveStatus | undefined): string => {
+  if (!status) {
+    return 'OPEN';
+  }
+
+  if (status.scoreLabel) {
+    return status.scoreLabel;
+  }
+
+  if (status.homeScore !== null && status.awayScore !== null) {
+    return `${status.homeScore}-${status.awayScore}`;
+  }
+
+  return status.statusLabel;
 };
 
 const getLegBadgeClassName = (
@@ -233,11 +291,37 @@ const fetchMarketDetail = async (
   return (await response.json()) as MarketDetail;
 };
 
+const fetchTeamBranding = async (
+  teamNames: string[]
+): Promise<Record<string, TeamBranding>> => {
+  if (teamNames.length === 0) {
+    return {};
+  }
+
+  const response = await fetch(
+    `/api/team-colors?teams=${encodeURIComponent(teamNames.join(','))}`,
+    {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    }
+  );
+
+  if (!response.ok) {
+    return {};
+  }
+
+  const payload = (await response.json()) as {
+    teams?: Record<string, TeamBranding>;
+  };
+
+  return payload.teams ?? {};
+};
+
 const createParlayTeam = async (
   name: string,
   memberUsernames: string[],
   captainUsername: string | null
-): Promise<ParlayTeam | null> => {
+): Promise<{ team: ParlayTeam | null; message: string | null }> => {
   const response = await fetch('/api/parlay-teams', {
     method: 'POST',
     headers: {
@@ -253,14 +337,29 @@ const createParlayTeam = async (
   });
 
   if (!response.ok) {
-    return null;
+    const payload = (await response.json().catch(() => ({}))) as {
+      message?: string;
+      error?: string;
+    };
+
+    return {
+      team: null,
+      message:
+        payload.message ??
+        (payload.error
+          ? String(payload.error)
+          : 'Failed to create Parlay Team.'),
+    };
   }
 
   const payload = (await response.json()) as {
     team?: ParlayTeam;
   };
 
-  return payload.team ?? null;
+  return {
+    team: payload.team ?? null,
+    message: null,
+  };
 };
 
 const commitShareToParlayTeam = async (
@@ -392,6 +491,12 @@ const PortfolioPage = () => {
   const [sellShares, setSellShares] = useState(0);
   const [loadingSellDetail, setLoadingSellDetail] = useState(false);
   const [selling, setSelling] = useState(false);
+  const [positionCurrentPricesById, setPositionCurrentPricesById] = useState<
+    Record<string, number>
+  >({});
+  const [teamBrandingByName, setTeamBrandingByName] = useState<
+    Record<string, TeamBranding>
+  >({});
 
   useEffect(() => {
     let cancelled = false;
@@ -476,12 +581,89 @@ const PortfolioPage = () => {
     [portfolioState.positions]
   );
 
+  useEffect(() => {
+    if (openPositions.length === 0) {
+      setPositionCurrentPricesById({});
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadCurrentPrices = async () => {
+      const entries = await Promise.all(
+        openPositions.map(async (position) => {
+          const detail = await fetchMarketDetail(position);
+
+          if (!detail) {
+            return [position.id, position.entryPrice] as const;
+          }
+
+          const currentPrice =
+            position.buySide === 'NO' ? detail.noPrice : detail.yesPrice;
+
+          return [position.id, currentPrice] as const;
+        })
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      setPositionCurrentPricesById(Object.fromEntries(entries));
+    };
+
+    void loadCurrentPrices();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [openPositions]);
+
+  useEffect(() => {
+    const teamNames = Array.from(
+      new Set(
+        openPositions.flatMap((position) => [
+          position.homeTeam,
+          position.awayTeam,
+        ])
+      )
+    );
+
+    if (teamNames.length === 0) {
+      setTeamBrandingByName({});
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadTeamBranding = async () => {
+      const teams = await fetchTeamBranding(teamNames);
+      if (!cancelled) {
+        setTeamBrandingByName(teams);
+      }
+    };
+
+    void loadTeamBranding();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [openPositions]);
+
+  const getPositionCurrentPrice = (position: PaperPosition) => {
+    return positionCurrentPricesById[position.id] ?? position.entryPrice;
+  };
+
   const deployedCapital = useMemo(
     () =>
       openPositions.reduce((sum, position) => {
-        return sum + position.stake;
+        const currentPrice = positionCurrentPricesById[position.id];
+        const effectivePrice =
+          typeof currentPrice === 'number' ? currentPrice : position.entryPrice;
+
+        return sum + position.quantity * effectivePrice;
       }, 0),
-    [openPositions]
+    [openPositions, positionCurrentPricesById]
   );
 
   const positionsById = useMemo(() => {
@@ -523,6 +705,19 @@ const PortfolioPage = () => {
       return [] as PaperPosition[];
     }
 
+    const firstLeg = [...selectedParlayTeam.committedLegs].sort(
+      (a, b) => a.sequence - b.sequence
+    )[0];
+    const firstLegKickoffMs = firstLeg
+      ? new Date(firstLeg.kickoff).getTime()
+      : Number.NaN;
+    const firstLegStarted =
+      Number.isFinite(firstLegKickoffMs) && firstLegKickoffMs <= Date.now();
+
+    if (firstLegStarted) {
+      return [] as PaperPosition[];
+    }
+
     const teamPositionIds = new Set(
       selectedParlayTeam.committedLegs.map((leg) => leg.positionId)
     );
@@ -553,6 +748,21 @@ const PortfolioPage = () => {
       ) ?? null
     );
   }, [selectedTeamOpenPositions, selectedTeamPositionId]);
+
+  const selectedParlayFirstLegStarted = useMemo(() => {
+    if (!selectedParlayTeam || selectedParlayTeam.committedLegs.length === 0) {
+      return false;
+    }
+
+    const firstLeg = [...selectedParlayTeam.committedLegs].sort(
+      (a, b) => a.sequence - b.sequence
+    )[0];
+    const firstLegKickoffMs = new Date(firstLeg.kickoff).getTime();
+
+    return (
+      Number.isFinite(firstLegKickoffMs) && firstLegKickoffMs <= Date.now()
+    );
+  }, [selectedParlayTeam]);
 
   useEffect(() => {
     teamLegLiveStatusesRef.current = teamLegLiveStatusesById;
@@ -700,6 +910,11 @@ const PortfolioPage = () => {
       return;
     }
 
+    if (selectedMembers.length === 0) {
+      setTeamFeedback('Add at least one other user to your Parlay Team.');
+      return;
+    }
+
     if (selectedMembers.length > MAX_ADDITIONAL_MEMBERS) {
       setTeamFeedback('You can add up to 9 members (10 total with captain).');
       return;
@@ -708,13 +923,15 @@ const PortfolioPage = () => {
     setCreatingTeam(true);
     setTeamFeedback(null);
 
-    const nextTeam = await createParlayTeam(
+    const createResult = await createParlayTeam(
       name,
       selectedMembers.map((member) => member.username),
       username
     );
+    const nextTeam = createResult.team;
+
     if (!nextTeam) {
-      setTeamFeedback('Failed to create Parlay Team.');
+      setTeamFeedback(createResult.message ?? 'Failed to create Parlay Team.');
       setCreatingTeam(false);
       return;
     }
@@ -932,7 +1149,7 @@ const PortfolioPage = () => {
                 setSelectedMembers([]);
                 setTeamFeedback(null);
               }}
-              className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-blue-700"
+              className="landing-header-button"
             >
               Create Parlay Team
             </button>
@@ -986,6 +1203,33 @@ const PortfolioPage = () => {
 
                       <div className="mt-3 space-y-2 text-sm">
                         <div className="flex flex-wrap items-center gap-2 text-gray-700">
+                          {position.side !== 'draw' &&
+                          teamBrandingByName[
+                            position.side === 'home'
+                              ? position.homeTeam
+                              : position.awayTeam
+                          ]?.logo ? (
+                            <img
+                              src={
+                                teamBrandingByName[
+                                  position.side === 'home'
+                                    ? position.homeTeam
+                                    : position.awayTeam
+                                ]?.logo
+                              }
+                              alt=""
+                              className="h-4 w-4 rounded-full object-cover"
+                            />
+                          ) : null}
+                          {position.side !== 'draw' ? (
+                            <span>
+                              {countryNameToFlag(
+                                position.side === 'home'
+                                  ? position.homeTeam
+                                  : position.awayTeam
+                              )}
+                            </span>
+                          ) : null}
                           <span className="font-semibold text-gray-900">
                             {position.side === 'home'
                               ? position.homeTeam
@@ -1027,10 +1271,14 @@ const PortfolioPage = () => {
                           </div>
                           <div className="rounded-lg border border-emerald-100 bg-white p-2">
                             <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-emerald-800 uppercase tracking-wide">
-                              Potential Payout
+                              Current Value
                             </span>
                             <p className="mt-1 font-semibold text-gray-900 text-sm">
-                              ${position.quantity.toFixed(2)}
+                              $
+                              {roundToCents(
+                                position.quantity *
+                                  getPositionCurrentPrice(position)
+                              ).toFixed(2)}
                             </p>
                           </div>
                         </div>
@@ -1044,7 +1292,7 @@ const PortfolioPage = () => {
                           <button
                             type="button"
                             onClick={() => openSellModal(position)}
-                            className="rounded-md bg-violet-600 px-3 py-1.5 font-semibold text-sm text-white transition hover:bg-violet-700"
+                            className="landing-header-button"
                           >
                             SELL
                           </button>
@@ -1279,6 +1527,7 @@ const PortfolioPage = () => {
                 disabled={
                   creatingTeam ||
                   teamName.trim().length === 0 ||
+                  selectedMembers.length === 0 ||
                   selectedMembers.length > MAX_ADDITIONAL_MEMBERS
                 }
                 className="w-full rounded-md bg-blue-600 px-4 py-3 font-semibold text-sm text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1386,13 +1635,21 @@ const PortfolioPage = () => {
                             </span>
                           </div>
 
-                          <p className="mt-2 font-medium text-gray-900 text-sm">
-                            {leg.cardTitle}
-                          </p>
+                          <div className="mt-2 flex items-center justify-between gap-2">
+                            <p className="font-medium text-gray-900 text-sm">
+                              {leg.cardTitle}
+                            </p>
+                            <button
+                              type="button"
+                              className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 font-semibold text-[11px] text-violet-700"
+                            >
+                              Rollover
+                            </button>
+                          </div>
 
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                             <span className="inline-flex rounded-full border border-green-200 bg-white px-2 py-0.5 font-medium text-green-700">
-                              {liveStatus?.statusLabel ?? 'OPEN'}
+                              {getLiveBadgeLabel(liveStatus)}
                             </span>
                             <span className="text-gray-600">
                               {formatLiveSummary(
@@ -1496,8 +1753,9 @@ const PortfolioPage = () => {
 
                 {selectedTeamOpenPositions.length === 0 ? (
                   <p className="text-gray-500 text-xs">
-                    No eligible positions available. Legs with conflicting start
-                    times cannot be added to this Parlay Team.
+                    {selectedParlayFirstLegStarted
+                      ? 'No eligible positions available. Once the first leg starts, no more legs can be added.'
+                      : 'No eligible positions available. Legs with conflicting start times cannot be added to this Parlay Team.'}
                   </p>
                 ) : null}
 
@@ -1553,6 +1811,7 @@ const PortfolioPage = () => {
                   type="button"
                   onClick={() => void handleCommitShareToTeam()}
                   disabled={
+                    selectedParlayFirstLegStarted ||
                     !selectedTeamPosition ||
                     sharesToCommit <= 0 ||
                     committingShare
