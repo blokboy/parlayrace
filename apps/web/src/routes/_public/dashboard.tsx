@@ -129,7 +129,7 @@ const getTeamButtonPalette = (team: {
   };
 };
 
-const formatKickoff = (isoDate: string): string => {
+const formatKickoff = (isoDate: string, timeZone: string): string => {
   const value = new Date(isoDate);
   if (Number.isNaN(value.getTime())) {
     return 'TBD';
@@ -140,13 +140,15 @@ const formatKickoff = (isoDate: string): string => {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone,
     timeZoneName: 'short',
   }).format(value);
 };
 
 const toMarketCard = (
   market: MarketItem,
-  teamBrands: Record<string, TeamBranding>
+  teamBrands: Record<string, TeamBranding>,
+  timeZone: string
 ): MarketCard | null => {
   const homeLeg = market.legs.find((leg) => leg.side === 'home');
   const drawLeg = market.legs.find((leg) => leg.side === 'draw');
@@ -163,7 +165,7 @@ const toMarketCard = (
     id: market.id,
     matchup: market.matchup,
     kickoffIso: market.kickoff,
-    kickoff: formatKickoff(market.kickoff),
+    kickoff: formatKickoff(market.kickoff, timeZone),
     home: {
       name: market.homeTeam,
       logo: homeBrand?.logo ?? '',
@@ -325,6 +327,14 @@ const DashboardPage = () => {
   const [pickSide, setPickSide] = useState<'YES' | 'NO'>('YES');
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [userTimeZone, setUserTimeZone] = useState('UTC');
+
+  useEffect(() => {
+    const detectedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (detectedTimeZone) {
+      setUserTimeZone(detectedTimeZone);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -371,10 +381,10 @@ const DashboardPage = () => {
 
   const marketCards = useMemo(() => {
     return markets
-      .map((market) => toMarketCard(market, teamBrands))
+      .map((market) => toMarketCard(market, teamBrands, userTimeZone))
       .filter((card): card is MarketCard => card !== null)
       .slice(0, 6);
-  }, [markets, teamBrands]);
+  }, [markets, teamBrands, userTimeZone]);
 
   useEffect(() => {
     if (marketCards.length === 0) {
