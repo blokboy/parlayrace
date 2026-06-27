@@ -1218,10 +1218,18 @@ const PortfolioPage = () => {
                                 ]?.logo
                               }
                               alt=""
-                              className="h-4 w-4 rounded-full object-cover"
+                              className="h-4 w-4 object-cover"
                             />
                           ) : null}
-
+                          {position.side !== 'draw' ? (
+                            <span>
+                              {countryNameToFlag(
+                                position.side === 'home'
+                                  ? position.homeTeam
+                                  : position.awayTeam
+                              )}
+                            </span>
+                          ) : null}
                           <span className="font-semibold text-gray-900">
                             {position.side === 'home'
                               ? position.homeTeam
