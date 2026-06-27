@@ -60,7 +60,9 @@ const normalizeState = (
 
   return {
     cash: Number.isFinite(value.cash) ? Number(value.cash) : fallback.cash,
-    positions: Array.isArray(value.positions) ? value.positions : fallback.positions,
+    positions: Array.isArray(value.positions)
+      ? value.positions
+      : fallback.positions,
   };
 };
 
@@ -71,7 +73,10 @@ export const Route = createFileRoute('/api/paper-portfolio')({
         const user = await getSessionUser(request);
 
         if (!user) {
-          return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+          return Response.json(
+            { ok: false, error: 'UNAUTHORIZED' },
+            { status: 401 }
+          );
         }
 
         const store = getStore();
@@ -86,7 +91,10 @@ export const Route = createFileRoute('/api/paper-portfolio')({
         const user = await getSessionUser(request);
 
         if (!user) {
-          return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+          return Response.json(
+            { ok: false, error: 'UNAUTHORIZED' },
+            { status: 401 }
+          );
         }
 
         const body = (await request.json().catch(() => ({}))) as {

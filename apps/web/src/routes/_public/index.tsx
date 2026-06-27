@@ -12,32 +12,32 @@ const LandingPage = () => {
           <div className="mx-auto w-full space-y-6">
             <div className="landing-panel p-6 sm:p-8">
               <p className="landing-kicker">Imported Odds. Team Parlays.</p>
-              <h1 className="landing-title mt-4 max-w-2xl text-5xl leading-[0.95] text-slate-900 sm:text-7xl">
+              <h1 className="landing-title mt-4 max-w-2xl text-5xl text-slate-900 leading-[0.95] sm:text-7xl">
                 Prediction Markets,
                 <br />
                 Made for Friends
               </h1>
-              <p className="mt-5 mb-5 max-w-xl text-base leading-7 text-slate-600 sm:text-lg">
+              <p className="mt-5 mb-5 max-w-xl text-base text-slate-600 leading-7 sm:text-lg">
                 Create an account to start tracking events, building positions,
                 and making parlays with your crew.
               </p>
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
-                  className="rounded-full bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700"
+                  className="rounded-full bg-violet-600 px-5 py-3 font-semibold text-sm text-white transition hover:bg-violet-700"
                   onClick={() => navigate({ to: '/auth/login' })}
                 >
                   Get Started
                 </button>
                 <Link
                   to="/dashboard"
-                  className="rounded-full border border-violet-200 bg-white px-5 py-3 text-sm font-semibold text-violet-600 transition hover:bg-violet-50 hover:text-violet-700"
+                  className="rounded-full border border-violet-200 bg-white px-5 py-3 font-semibold text-sm text-violet-600 transition hover:bg-violet-50 hover:text-violet-700"
                 >
                   Explore Dashboard
                 </Link>
                 <Link
                   to="/portfolio"
-                  className="rounded-full border border-violet-200 bg-white px-5 py-3 text-sm font-semibold text-violet-600 transition hover:bg-violet-50 hover:text-violet-700"
+                  className="rounded-full border border-violet-200 bg-white px-5 py-3 font-semibold text-sm text-violet-600 transition hover:bg-violet-50 hover:text-violet-700"
                 >
                   Open Portfolio
                 </Link>
@@ -47,7 +47,9 @@ const LandingPage = () => {
                 className="landing-feature-grid mt-8"
               >
                 <article className="landing-feature-card">
-                  <p className="landing-feature-title">Buy and Sell Positions</p>
+                  <p className="landing-feature-title">
+                    Buy and Sell Positions
+                  </p>
                   <p className="landing-feature-body">
                     Scan Polymarket quickly with clear hierarchy, concise data,
                     and simple decisions.
@@ -71,41 +73,49 @@ const LandingPage = () => {
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-2xl border border-violet-100 bg-white/85 p-4 shadow-[0_12px_40px_rgba(76,29,149,0.08)] backdrop-blur">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                <p className="text-slate-500 text-xs uppercase tracking-[0.18em]">
                   Live Markets
                 </p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">24/7</p>
+                <p className="mt-2 font-semibold text-2xl text-slate-900">
+                  24/7
+                </p>
               </div>
               <div className="rounded-2xl border border-violet-100 bg-white/85 p-4 shadow-[0_12px_40px_rgba(76,29,149,0.08)] backdrop-blur">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                <p className="text-slate-500 text-xs uppercase tracking-[0.18em]">
                   Crew Parlays
                 </p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">Co-op</p>
+                <p className="mt-2 font-semibold text-2xl text-slate-900">
+                  Co-op
+                </p>
               </div>
               <div className="rounded-2xl border border-violet-100 bg-white/85 p-4 shadow-[0_12px_40px_rgba(76,29,149,0.08)] backdrop-blur">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                <p className="text-slate-500 text-xs uppercase tracking-[0.18em]">
                   Retro Score
                 </p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">Live</p>
+                <p className="mt-2 font-semibold text-2xl text-slate-900">
+                  Live
+                </p>
               </div>
             </div>
             <div className="overflow-hidden rounded-3xl border border-violet-100 bg-white/90 p-5 shadow-[0_24px_80px_rgba(76,29,149,0.12)] backdrop-blur">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="landing-kicker text-[0.72rem]">Session Feed</p>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <p className="mt-1 text-slate-500 text-sm">
                     Live markets and team activity update in real time.
                   </p>
                 </div>
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 text-xs">
                   Live
                 </span>
               </div>
               <div className="mt-5 grid gap-3 md:grid-cols-3">
                 <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-                  <div className="flex items-center justify-between text-sm text-slate-500">
+                  <div className="flex items-center justify-between text-slate-500 text-sm">
                     <span>Track</span>
-                    <span className="font-semibold text-slate-700">Markets</span>
+                    <span className="font-semibold text-slate-700">
+                      Markets
+                    </span>
                   </div>
                   <div className="mt-3 h-2 rounded-full bg-slate-200">
                     <div
@@ -115,7 +125,7 @@ const LandingPage = () => {
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-                  <div className="flex items-center justify-between text-sm text-slate-500">
+                  <div className="flex items-center justify-between text-slate-500 text-sm">
                     <span>Make</span>
                     <span className="font-semibold text-slate-700">
                       Predictions
@@ -129,9 +139,11 @@ const LandingPage = () => {
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-                  <div className="flex items-center justify-between text-sm text-slate-500">
+                  <div className="flex items-center justify-between text-slate-500 text-sm">
                     <span>Play</span>
-                    <span className="font-semibold text-slate-700">Together</span>
+                    <span className="font-semibold text-slate-700">
+                      Together
+                    </span>
                   </div>
                   <div className="mt-3 h-2 rounded-full bg-slate-200">
                     <div

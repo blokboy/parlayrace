@@ -49,7 +49,10 @@ export const Route = createFileRoute('/api/parlay-teams')({
         const user = await getSessionUser(request);
 
         if (!user) {
-          return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+          return Response.json(
+            { ok: false, error: 'UNAUTHORIZED' },
+            { status: 401 }
+          );
         }
 
         const teams = getStore().get(user.id) ?? [];
@@ -59,7 +62,10 @@ export const Route = createFileRoute('/api/parlay-teams')({
         const user = await getSessionUser(request);
 
         if (!user) {
-          return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+          return Response.json(
+            { ok: false, error: 'UNAUTHORIZED' },
+            { status: 401 }
+          );
         }
 
         const body = (await request.json().catch(() => ({}))) as {
@@ -68,7 +74,10 @@ export const Route = createFileRoute('/api/parlay-teams')({
         };
 
         if (body.action !== 'create' || !body.name?.trim()) {
-          return Response.json({ ok: false, error: 'INVALID_CREATE' }, { status: 400 });
+          return Response.json(
+            { ok: false, error: 'INVALID_CREATE' },
+            { status: 400 }
+          );
         }
 
         const store = getStore();
@@ -99,7 +108,10 @@ export const Route = createFileRoute('/api/parlay-teams')({
         const user = await getSessionUser(request);
 
         if (!user) {
-          return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+          return Response.json(
+            { ok: false, error: 'UNAUTHORIZED' },
+            { status: 401 }
+          );
         }
 
         const body = (await request.json().catch(() => ({}))) as {
@@ -114,14 +126,24 @@ export const Route = createFileRoute('/api/parlay-teams')({
         const teamIndex = teams.findIndex((team) => team.id === body.teamId);
 
         if (teamIndex < 0) {
-          return Response.json({ ok: false, error: 'TEAM_NOT_FOUND' }, { status: 404 });
+          return Response.json(
+            { ok: false, error: 'TEAM_NOT_FOUND' },
+            { status: 404 }
+          );
         }
 
         const team = teams[teamIndex];
 
         if (body.action === 'commit-share') {
-          if (!body.positionId || !Number.isFinite(body.shares) || Number(body.shares) <= 0) {
-            return Response.json({ ok: false, error: 'INVALID_COMMIT' }, { status: 400 });
+          if (
+            !body.positionId ||
+            !Number.isFinite(body.shares) ||
+            Number(body.shares) <= 0
+          ) {
+            return Response.json(
+              { ok: false, error: 'INVALID_COMMIT' },
+              { status: 400 }
+            );
           }
 
           const existing = team.committedLegs.find(
@@ -142,7 +164,10 @@ export const Route = createFileRoute('/api/parlay-teams')({
           team.claimedAt = nowIso();
           team.updatedAt = nowIso();
         } else {
-          return Response.json({ ok: false, error: 'INVALID_ACTION' }, { status: 400 });
+          return Response.json(
+            { ok: false, error: 'INVALID_ACTION' },
+            { status: 400 }
+          );
         }
 
         const next = [...teams];

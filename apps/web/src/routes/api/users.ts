@@ -26,7 +26,10 @@ export const Route = createFileRoute('/api/users')({
         const user = await getSessionUser(request);
 
         if (!user) {
-          return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+          return Response.json(
+            { ok: false, error: 'UNAUTHORIZED' },
+            { status: 401 }
+          );
         }
 
         const url = new URL(request.url);
