@@ -309,7 +309,9 @@ const toStatusPayload = (
       : longStatus || null;
 
   return {
-    statusLabel: isFinal ? 'Final' : eventTime || (hasStarted ? 'Live' : 'OPEN'),
+    statusLabel: isFinal
+      ? 'Final'
+      : eventTime || (hasStarted ? 'Live' : 'OPEN'),
     hasStarted,
     isFinal,
     eventTime,
@@ -392,33 +394,42 @@ const fetchLiveStatuses = async (
     )
   );
 
-  const liveResponse = await fetch('https://v3.football.api-sports.io/fixtures?live=all', {
-    method: 'GET',
-    headers: {
-      'x-apisports-key': apiKey,
-      Accept: 'application/json',
-    },
-  });
+  const liveResponse = await fetch(
+    'https://v3.football.api-sports.io/fixtures?live=all',
+    {
+      method: 'GET',
+      headers: {
+        'x-apisports-key': apiKey,
+        Accept: 'application/json',
+      },
+    }
+  );
 
   const liveFixtures = liveResponse.ok
-    ? (((await liveResponse.json()) as { response?: ApiFootballFixture[] }).response ?? [])
+    ? (((await liveResponse.json()) as { response?: ApiFootballFixture[] })
+        .response ?? [])
     : [];
 
   const datedFixtures = await Promise.all(
     uniqueDates.map(async (date) => {
-      const response = await fetch(`https://v3.football.api-sports.io/fixtures?date=${date}`, {
-        method: 'GET',
-        headers: {
-          'x-apisports-key': apiKey,
-          Accept: 'application/json',
-        },
-      });
+      const response = await fetch(
+        `https://v3.football.api-sports.io/fixtures?date=${date}`,
+        {
+          method: 'GET',
+          headers: {
+            'x-apisports-key': apiKey,
+            Accept: 'application/json',
+          },
+        }
+      );
 
       if (!response.ok) {
         return [] as ApiFootballFixture[];
       }
 
-      const payload = (await response.json()) as { response?: ApiFootballFixture[] };
+      const payload = (await response.json()) as {
+        response?: ApiFootballFixture[];
+      };
       return payload.response ?? [];
     })
   );
@@ -503,7 +514,8 @@ const resolveLegResult = (
   }
 
   const pickedOutcomeWon = winner === position.side;
-  const legWon = position.buySide === 'YES' ? pickedOutcomeWon : !pickedOutcomeWon;
+  const legWon =
+    position.buySide === 'YES' ? pickedOutcomeWon : !pickedOutcomeWon;
   return legWon ? 'WON' : 'LOST';
 };
 
@@ -523,15 +535,24 @@ const computeClaimableAmount = (
   return pool;
 };
 
-const getSelectedParlay = <T extends { teamId: string; status: string; createdAt: Date; id: string }>(
+const getSelectedParlay = <
+  T extends { teamId: string; status: string; createdAt: Date; id: string },
+>(
   teamId: string,
   parlays: T[]
 ) => {
   const teamParlays = parlays
     .filter((parlay) => parlay.teamId === teamId)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
 
-  return teamParlays.find((parlay) => parlay.status === 'ACTIVE') ?? teamParlays[0] ?? null;
+  return (
+    teamParlays.find((parlay) => parlay.status === 'ACTIVE') ??
+    teamParlays[0] ??
+    null
+  );
 };
 
 const syncParlayStates = async (teamIds: string[]) => {
@@ -553,7 +574,8 @@ const syncParlayStates = async (teamIds: string[]) => {
       },
     }),
     db.query.userProfile.findFirst({
-      where: (table, { eq: equals }) => equals(table.username, BLOKBOY_USERNAME),
+      where: (table, { eq: equals }) =>
+        equals(table.username, BLOKBOY_USERNAME),
       columns: {
         id: true,
       },
@@ -565,7 +587,9 @@ const syncParlayStates = async (teamIds: string[]) => {
     return;
   }
 
-  const userIds = Array.from(new Set(memberships.map((membership) => membership.userId)));
+  const userIds = Array.from(
+    new Set(memberships.map((membership) => membership.userId))
+  );
   const portfolioRows =
     userIds.length > 0
       ? await db.query.paperPortfolio.findMany({
@@ -861,7 +885,8 @@ const buildTeamResponses = async (
         });
 
       const currentClaim = claims.find(
-        (claim) => claim.parlayId === selectedParlayId && claim.userId === currentUserId
+        (claim) =>
+          claim.parlayId === selectedParlayId && claim.userId === currentUserId
       );
       const totalStake = roundToCents(
         teamShares.reduce((sum, share) => sum + share.stake, 0)
@@ -871,9 +896,13 @@ const buildTeamResponses = async (
           .filter((share) => share.addedByUserId === currentUserId)
           .reduce((sum, share) => sum + share.stake, 0)
       );
-      const claimableAmount = roundToCents(selectedParlay?.claimableAmount ?? 0);
+      const claimableAmount = roundToCents(
+        selectedParlay?.claimableAmount ?? 0
+      );
       const proportionalClaim =
-        selectedParlay?.status === 'WON' && totalStake > 0 && currentUserStake > 0
+        selectedParlay?.status === 'WON' &&
+        totalStake > 0 &&
+        currentUserStake > 0
           ? roundToCents((claimableAmount * currentUserStake) / totalStake)
           : 0;
 
@@ -973,21 +1002,70 @@ export const Route = createFileRoute('/api/parlay-teams')({
           );
         }
 
-        const captainUsername =
-          body.captainUsername?.trim() || user.name || user.email.split('@')[0];
+        const captainUsername = body.captainUsername?.trim() || null;
 
-        await db
-          .insert(userProfile)
-          .values({
-            id: user.id,
-            username: captainUsername,
-          })
-          .onConflictDoUpdate({
-            target: userProfile.id,
-            set: {
-              updatedAt: new Date(),
-            },
-          });
+        const existingCaptainProfile = await db.query.userProfile.findFirst({
+          where: (table, { eq: equals }) => equals(table.id, user.id),
+          columns: {
+            id: true,
+            username: true,
+          },
+        });
+
+        if (existingCaptainProfile) {
+          if (!existingCaptainProfile.username && captainUsername) {
+            try {
+              await db
+                .insert(userProfile)
+                .values({
+                  id: user.id,
+                  username: captainUsername,
+                })
+                .onConflictDoUpdate({
+                  target: userProfile.id,
+                  set: {
+                    username: captainUsername,
+                    updatedAt: new Date(),
+                  },
+                });
+            } catch {
+              await db
+                .insert(userProfile)
+                .values({
+                  id: user.id,
+                })
+                .onConflictDoUpdate({
+                  target: userProfile.id,
+                  set: {
+                    updatedAt: new Date(),
+                  },
+                });
+            }
+          } else {
+            await db
+              .insert(userProfile)
+              .values({
+                id: user.id,
+              })
+              .onConflictDoUpdate({
+                target: userProfile.id,
+                set: {
+                  updatedAt: new Date(),
+                },
+              });
+          }
+        } else {
+          try {
+            await db.insert(userProfile).values({
+              id: user.id,
+              username: captainUsername,
+            });
+          } catch {
+            await db.insert(userProfile).values({
+              id: user.id,
+            });
+          }
+        }
 
         const matchedProfiles = uniqueMemberUsernames.length
           ? await db.query.userProfile.findMany({
@@ -1128,7 +1206,9 @@ export const Route = createFileRoute('/api/parlay-teams')({
           const currentUserPortfolio = memberPortfolios.find(
             (portfolio) => portfolio.userId === user.id
           );
-          const currentUserPositions = Array.isArray(currentUserPortfolio?.positions)
+          const currentUserPositions = Array.isArray(
+            currentUserPortfolio?.positions
+          )
             ? (currentUserPortfolio.positions as PaperPosition[])
             : [];
           const targetPosition = currentUserPositions.find(
@@ -1145,7 +1225,9 @@ export const Route = createFileRoute('/api/parlay-teams')({
           const teamParlays = await db.query.parlayTeamParlay.findMany({
             where: (table, { eq: equals }) => equals(table.teamId, teamId),
           });
-          const activeParlay = teamParlays.find((parlay) => parlay.status === 'ACTIVE');
+          const activeParlay = teamParlays.find(
+            (parlay) => parlay.status === 'ACTIVE'
+          );
           const ensuredParlay =
             activeParlay ??
             (
@@ -1163,7 +1245,10 @@ export const Route = createFileRoute('/api/parlay-teams')({
 
           const existingShares = await db.query.parlayTeamParlayShare.findMany({
             where: (table, { and, eq: equals }) =>
-              and(equals(table.teamId, teamId), equals(table.parlayId, ensuredParlay.id)),
+              and(
+                equals(table.teamId, teamId),
+                equals(table.parlayId, ensuredParlay.id)
+              ),
           });
 
           const alreadyCommittedByUserForPosition = roundToCents(
@@ -1176,12 +1261,16 @@ export const Route = createFileRoute('/api/parlay-teams')({
               .reduce((sum, share) => sum + share.shares, 0)
           );
 
-          if (targetShares + alreadyCommittedByUserForPosition > targetPosition.quantity) {
+          if (
+            targetShares + alreadyCommittedByUserForPosition >
+            targetPosition.quantity
+          ) {
             return Response.json(
               {
                 ok: false,
                 error: 'INSUFFICIENT_SHARES',
-                message: 'Cannot commit more shares than this position contains.',
+                message:
+                  'Cannot commit more shares than this position contains.',
               },
               { status: 400 }
             );
@@ -1235,11 +1324,18 @@ export const Route = createFileRoute('/api/parlay-teams')({
             entryPrice: roundToCents(targetPosition.entryPrice),
           });
         } else if (body.action === 'claim') {
-          const winningParlay = getSelectedParlay(teamId, await db.query.parlayTeamParlay.findMany({
-            where: (table, { eq: equals }) => equals(table.teamId, teamId),
-          }));
+          const winningParlay = getSelectedParlay(
+            teamId,
+            await db.query.parlayTeamParlay.findMany({
+              where: (table, { eq: equals }) => equals(table.teamId, teamId),
+            })
+          );
 
-          if (!winningParlay || winningParlay.status !== 'WON' || winningParlay.claimableAmount <= 0) {
+          if (
+            !winningParlay ||
+            winningParlay.status !== 'WON' ||
+            winningParlay.claimableAmount <= 0
+          ) {
             return Response.json(
               { ok: false, error: 'PARLAY_NOT_CLAIMABLE' },
               { status: 400 }
@@ -1248,7 +1344,10 @@ export const Route = createFileRoute('/api/parlay-teams')({
 
           const existingClaim = await db.query.parlayTeamParlayClaim.findFirst({
             where: (table, { and, eq: equals }) =>
-              and(equals(table.parlayId, winningParlay.id), equals(table.userId, user.id)),
+              and(
+                equals(table.parlayId, winningParlay.id),
+                equals(table.userId, user.id)
+              ),
           });
 
           if (existingClaim) {
@@ -1259,7 +1358,8 @@ export const Route = createFileRoute('/api/parlay-teams')({
           }
 
           const parlayShares = await db.query.parlayTeamParlayShare.findMany({
-            where: (table, { eq: equals }) => equals(table.parlayId, winningParlay.id),
+            where: (table, { eq: equals }) =>
+              equals(table.parlayId, winningParlay.id),
           });
           const totalStake = roundToCents(
             parlayShares.reduce((sum, share) => sum + share.stake, 0)
@@ -1277,7 +1377,9 @@ export const Route = createFileRoute('/api/parlay-teams')({
             );
           }
 
-          const claimAmount = roundToCents((winningParlay.claimableAmount * userStake) / totalStake);
+          const claimAmount = roundToCents(
+            (winningParlay.claimableAmount * userStake) / totalStake
+          );
           if (claimAmount <= 0) {
             return Response.json(
               { ok: false, error: 'NOTHING_TO_CLAIM' },

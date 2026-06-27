@@ -1395,7 +1395,10 @@ const PortfolioPage = () => {
                               {liveStatus?.statusLabel ?? 'OPEN'}
                             </span>
                             <span className="text-gray-600">
-                              {formatLiveSummary(liveStatus, formatTradeTime(leg.kickoff))}
+                              {formatLiveSummary(
+                                liveStatus,
+                                formatTradeTime(leg.kickoff)
+                              )}
                             </span>
                           </div>
 
