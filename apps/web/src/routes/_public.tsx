@@ -12,6 +12,7 @@ const PublicLayout = () => {
   const location = useLocation();
   const user = Route.useRouteContext({ from: '__root__' }).user;
   const isDashboardPage = location.pathname === '/dashboard';
+  const isPortfolioPage = location.pathname === '/portfolio';
 
   return (
     <>
@@ -59,6 +60,26 @@ const PublicLayout = () => {
                   Sign In
                 </button>
               )}
+            </div>
+          ) : isPortfolioPage && user ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="landing-header-button-ghost"
+                onClick={() => navigate({ to: '/dashboard' })}
+              >
+                Dashboard
+              </button>
+              <button
+                type="button"
+                className="landing-header-button"
+                onClick={async () => {
+                  await signOut();
+                  window.location.assign('/');
+                }}
+              >
+                Sign Out
+              </button>
             </div>
           ) : null}
         </div>

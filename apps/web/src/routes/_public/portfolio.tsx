@@ -1,3 +1,10 @@
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@starter/ui/components/shadcn/dialog';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -297,8 +304,6 @@ const getLegStatus = (
 };
 
 const PortfolioPage = () => {
-  const user = Route.useRouteContext({ from: '__root__' }).user;
-
   const [state, setState] = useState<PaperPortfolioState>(defaultPortfolio());
   const [valuations, setValuations] = useState<
     Record<string, PositionValuation>
@@ -323,6 +328,7 @@ const PortfolioPage = () => {
   const [commitTeamId, setCommitTeamId] = useState('');
   const [commitPositionId, setCommitPositionId] = useState('');
   const [commitShares, setCommitShares] = useState('10');
+  const [sellPositionId, setSellPositionId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
 
@@ -477,6 +483,16 @@ const PortfolioPage = () => {
   );
 
   const totalEquity = roundToCents(state.cash + openValue);
+  const sellPosition = useMemo(
+    () => state.positions.find((position) => position.id === sellPositionId) ?? null,
+    [sellPositionId, state.positions]
+  );
+  const sellPositionValuation = sellPosition
+    ? valuations[sellPosition.id] ?? null
+    : null;
+  const sellPositionCurrentValue = sellPosition
+    ? sellPositionValuation?.currentValue ?? sellPosition.stake
+    : 0;
 
   const persistAndRefresh = async (next: PaperPortfolioState) => {
     setState(next);
@@ -631,21 +647,35 @@ const PortfolioPage = () => {
     await reloadTeams();
   };
 
+  const handleConfirmSellPosition = async () => {
+    if (!sellPositionId) {
+      return;
+    }
+
+    await handleSellPosition(sellPositionId);
+    setSellPositionId(null);
+  };
+
   return (
     <main className="dashboard-arcade landing-arcade relative min-h-screen overflow-hidden pt-16">
       <div className="landing-arcade__glow" />
       <div className="landing-arcade__scanlines" />
       <div className="dashboard-arcade__content relative z-10 mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-        <header className="landing-panel space-y-2 p-6">
-          <h1 className="font-bold text-3xl text-gray-900">Portfolio</h1>
-          <p className="text-sm text-violet-800">
-            Protected paper-trading portfolio for {user?.email}
-          </p>
+        <header className="landing-panel p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="font-bold text-3xl text-gray-900">Portfolio</h1>
+              <p className="text-sm text-violet-800">
+                Open paper trades for this user.
+              </p>
+            </div>
+            <p className="text-sm text-violet-800">Sign in to create a Parlay Team.</p>
+          </div>
         </header>
 
         {loading ? (
           <div className="landing-panel p-6 text-sm text-violet-900">
-            Loading portfolio...
+            Loading portfolio data
           </div>
         ) : (
           <>
@@ -729,81 +759,89 @@ const PortfolioPage = () => {
               </div>
             </section>
 
-            <section className="landing-panel overflow-x-auto p-6">
-              <h2 className="mb-3 font-semibold text-lg text-violet-950">
+            <section className="space-y-3">
+              <h2 className="font-semibold text-lg text-violet-950">
                 Open Positions
               </h2>
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="text-violet-800">
-                    <th className="pb-2">Match</th>
-                    <th className="pb-2">Entry</th>
-                    <th className="pb-2">Now</th>
-                    <th className="pb-2">Value</th>
-                    <th className="pb-2">Live</th>
-                    <th className="pb-2">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {openPositions.map((position) => {
-                    const valuation = valuations[position.id];
-                    const label = liveLabels[position.matchup] ?? 'OPEN';
-                    const homeBrand = teamBranding[position.homeTeam];
-                    const awayBrand = teamBranding[position.awayTeam];
-                    return (
-                      <tr
-                        key={position.id}
-                        className="border-violet-100 border-t"
-                      >
-                        <td className="py-2">
-                          <div className="flex items-center gap-2">
-                            {homeBrand?.logo ? (
-                              <img
-                                src={homeBrand.logo}
-                                alt={position.homeTeam}
-                                className="h-4 w-6 rounded object-cover"
-                              />
-                            ) : null}
-                            <span>{position.homeTeam}</span>
-                            <span>vs</span>
-                            <span>{position.awayTeam}</span>
-                            {awayBrand?.logo ? (
-                              <img
-                                src={awayBrand.logo}
-                                alt={position.awayTeam}
-                                className="h-4 w-6 rounded object-cover"
-                              />
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="py-2">
-                          {position.buySide} ${position.entryPrice.toFixed(2)}
-                        </td>
-                        <td className="py-2">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {openPositions.map((position) => {
+                  const valuation = valuations[position.id];
+                  const label = liveLabels[position.matchup] ?? 'OPEN';
+                  const homeBrand = teamBranding[position.homeTeam];
+                  const awayBrand = teamBranding[position.awayTeam];
+
+                  return (
+                    <div
+                      key={position.id}
+                      className="landing-panel p-6 transition-shadow hover:shadow-lg"
+                    >
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <h3 className="font-semibold text-lg text-violet-950">
+                          {position.matchup}
+                        </h3>
+                        <span className="inline-block rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-xs">
+                          {label}
+                        </span>
+                      </div>
+
+                      <div className="mb-4 flex items-center gap-2 text-violet-800/80 text-xs">
+                        {new Intl.DateTimeFormat('en-US', {
+                          month: 'short',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        }).format(new Date(position.kickoff))}
+                      </div>
+
+                      <div className="space-y-2 text-sm text-violet-900">
+                        <div className="flex items-center gap-2">
+                          {homeBrand?.logo ? (
+                            <img
+                              src={homeBrand.logo}
+                              alt={position.homeTeam}
+                              className="h-4 w-6 rounded object-cover"
+                            />
+                          ) : null}
+                          <span>{position.homeTeam}</span>
+                          <span>vs</span>
+                          <span>{position.awayTeam}</span>
+                          {awayBrand?.logo ? (
+                            <img
+                              src={awayBrand.logo}
+                              alt={position.awayTeam}
+                              className="h-4 w-6 rounded object-cover"
+                            />
+                          ) : null}
+                        </div>
+
+                        <p>
+                          Entry: {position.buySide} ${position.entryPrice.toFixed(2)}
+                        </p>
+                        <p>
+                          Now:{' '}
                           {valuation
                             ? `$${valuation.currentPrice.toFixed(2)}`
                             : '--'}
-                        </td>
-                        <td className="py-2">
+                        </p>
+                        <p>
+                          Value:{' '}
                           {valuation
                             ? `$${valuation.currentValue.toFixed(2)}`
                             : `$${position.stake.toFixed(2)}`}
-                        </td>
-                        <td className="py-2">{label}</td>
-                        <td className="py-2">
-                          <button
-                            type="button"
-                            onClick={() => void handleSellPosition(position.id)}
-                            className="rounded-md border border-violet-200 px-3 py-1 font-semibold text-violet-900 text-xs transition hover:bg-violet-50"
-                          >
-                            Sell
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setSellPositionId(position.id)}
+                        className="mt-4 w-full rounded-md border border-violet-200 px-3 py-2 font-semibold text-violet-900 text-xs transition hover:bg-violet-50"
+                      >
+                        Sell
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </section>
 
             <section className="grid gap-4 lg:grid-cols-2">
@@ -968,6 +1006,59 @@ const PortfolioPage = () => {
           </>
         )}
       </div>
+
+      <Dialog
+        open={sellPosition !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSellPositionId(null);
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-md border-violet-200 bg-white"
+        >
+          <DialogHeader>
+            <DialogTitle className="text-violet-950">Confirm Sell</DialogTitle>
+            <p className="text-sm text-violet-800">
+              {sellPosition ? sellPosition.matchup : 'Loading position...'}
+            </p>
+            <DialogClose
+              aria-label="Close sell modal"
+              className="absolute top-4 right-4 rounded-sm p-1 text-violet-700 transition hover:bg-violet-100"
+            >
+              x
+            </DialogClose>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <p className="text-sm text-violet-800">
+              You are about to close this paper position.
+            </p>
+
+            <div className="rounded-md border border-violet-200 bg-violet-50/40 p-3 text-sm text-violet-900">
+              <p>
+                Entry: {sellPosition?.buySide ?? '--'}{' '}
+                {sellPosition ? `$${sellPosition.entryPrice.toFixed(2)}` : '--'}
+              </p>
+              <p>
+                Current Value: ${sellPositionCurrentValue.toFixed(2)}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={!sellPosition}
+              onClick={() => void handleConfirmSellPosition()}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span>Confirm SELL</span>
+              <span>${sellPositionCurrentValue.toFixed(2)}</span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 };

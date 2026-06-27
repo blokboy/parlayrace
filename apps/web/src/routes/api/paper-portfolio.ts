@@ -68,6 +68,7 @@ const getPortfolioStateForUser = async (
   });
 
   if (!row) {
+    await db.insert(paperPortfolio).values({ userId });
     return initialState();
   }
 
