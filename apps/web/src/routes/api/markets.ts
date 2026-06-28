@@ -120,12 +120,14 @@ const endOfDayUtc = (value: Date) =>
     )
   );
 
+// 8-day window (today + next 7). Kept in sync with SYNC_WINDOW_DAYS in
+// server/polymarket/sync.ts so the dashboard never asks for unsynced days.
 const getWindow = () => {
   const now = new Date();
   const from = startOfDayUtc(now);
-  const fourthDay = new Date(from);
-  fourthDay.setUTCDate(fourthDay.getUTCDate() + 3);
-  const to = endOfDayUtc(fourthDay);
+  const lastDay = new Date(from);
+  lastDay.setUTCDate(lastDay.getUTCDate() + 7);
+  const to = endOfDayUtc(lastDay);
   return { from, to };
 };
 
@@ -308,7 +310,7 @@ export const Route = createFileRoute('/api/markets')({
             };
           })
           .sort((a, b) => a.kickoff.localeCompare(b.kickoff))
-          .slice(0, 24);
+          .slice(0, 100);
 
         return Response.json({ markets });
       },

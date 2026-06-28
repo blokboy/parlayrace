@@ -299,8 +299,9 @@ const fetchMarkets = async (): Promise<MarketItem[]> => {
   const start = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
   );
+  // 8-day window (today + next 7) to match the sync's SYNC_WINDOW_DAYS.
   const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 3);
+  end.setUTCDate(end.getUTCDate() + 7);
 
   const dateFrom = start.toISOString();
   const dateTo = new Date(
@@ -620,7 +621,7 @@ const DashboardPage = () => {
     return markets
       .map((market) => toMarketCard(market, teamBrands, userTimeZone))
       .filter((card): card is MarketCard => card !== null)
-      .slice(0, 6);
+      .sort((a, b) => a.kickoffIso.localeCompare(b.kickoffIso));
   }, [markets, teamBrands, userTimeZone]);
 
   useEffect(() => {

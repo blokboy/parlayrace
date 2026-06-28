@@ -16,7 +16,7 @@ export const Route = createFileRoute('/api/sync/polymarket/scheduled')({
         }
 
         try {
-          const result = await syncPolyMarketMarkets({ limit: 500, batchSize: 100 });
+          const result = await syncPolyMarketMarkets({ limit: 500, batchSize: 150 });
 
           return Response.json({
             synced: result.observability.providerHealthy,

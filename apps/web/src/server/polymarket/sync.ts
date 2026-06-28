@@ -1,4 +1,5 @@
 import { db } from '@starter/backend/db';
+import { and, eq, inArray, lt } from '@starter/backend/orm';
 import {
   externalMarket,
   externalOutcome,
@@ -6,7 +7,6 @@ import {
   providerDeadLetter,
   providerSyncRun,
 } from '@starter/backend/schema';
-import { and, eq, inArray, lt } from '@starter/backend/orm';
 import { createHash } from 'node:crypto';
 
 type PolymarketToken = { outcome: string; price: number };
@@ -144,9 +144,9 @@ const startOfDayUtc = (d: Date) =>
   new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
 // Window of upcoming days (UTC) the sync persists. Kept in sync with the read
-// path's getWindow() in routes/api/markets.ts so the dashboard never asks for
-// days the sync didn't populate.
-const SYNC_WINDOW_DAYS = 4;
+// path's getWindow() in routes/api/markets.ts and routes/api/mlb-markets.ts so
+// the dashboard never asks for days the sync didn't populate.
+const SYNC_WINDOW_DAYS = 8;
 
 const isCloseTimeWithinWindow = (isoDate: string | undefined): boolean => {
   if (!isoDate) return false;
@@ -238,7 +238,7 @@ const isMlbEvent = (event: PolymarketEvent): boolean => {
 // Fetch MLB game events from the mlb + baseball tags, deduped. Only events with
 // a two-team matchup are returned (excludes futures like "World Series winner").
 export const fetchMlbGameEvents = async (limit = 1000): Promise<PolymarketEvent[]> => {
-  const pageLimit = Math.min(Math.max(limit, 1), 200);
+  const pageLimit = Math.min(Math.max(limit, 1), 500);
 
   const fetchTag = async (tag: string): Promise<PolymarketEvent[]> => {
     try {

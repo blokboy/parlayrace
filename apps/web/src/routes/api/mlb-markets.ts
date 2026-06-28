@@ -49,11 +49,13 @@ const endOfDayUtc = (value: Date) =>
     )
   );
 
+// 8-day window (today + next 7). Kept in sync with SYNC_WINDOW_DAYS in
+// server/polymarket/sync.ts so the dashboard never asks for unsynced days.
 const getWindow = () => {
   const now = new Date();
   const from = startOfDayUtc(now);
   const last = new Date(from);
-  last.setUTCDate(last.getUTCDate() + 3);
+  last.setUTCDate(last.getUTCDate() + 7);
   return { from, to: endOfDayUtc(last) };
 };
 
@@ -183,7 +185,7 @@ export const Route = createFileRoute('/api/mlb-markets')({
             };
           })
           .sort((a, b) => a.kickoff.localeCompare(b.kickoff))
-          .slice(0, 24);
+          .slice(0, 100);
 
         return Response.json({ markets });
       },
