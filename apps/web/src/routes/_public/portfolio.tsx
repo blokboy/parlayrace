@@ -1784,19 +1784,21 @@ const PortfolioPage = () => {
 
                     {historyParlayTeams.length > 0 ? (
                       <div className="mt-4">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setShowParlayHistory((value) => !value)
-                          }
-                          className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-3 py-1.5 font-semibold text-sm text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
-                        >
-                          {showParlayHistory ? 'Hide' : 'Show'} history (
-                          {historyParlayTeams.length})
-                          <span aria-hidden="true">
-                            {showParlayHistory ? '▲' : '▼'}
-                          </span>
-                        </button>
+                        <div className="flex justify-center">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShowParlayHistory((value) => !value)
+                            }
+                            className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-[14px] py-[8px] font-semibold text-sm text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
+                          >
+                            {showParlayHistory ? 'Hide' : 'Show'} history (
+                            {historyParlayTeams.length})
+                            <span aria-hidden="true">
+                              {showParlayHistory ? '▲' : '▼'}
+                            </span>
+                          </button>
+                        </div>
 
                         {showParlayHistory ? (
                           <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
