@@ -5,6 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@starter/ui/components/shadcn/dialog';
+import { Skeleton } from '@starter/ui/components/shadcn/skeleton';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -1155,9 +1156,62 @@ const PortfolioPage = () => {
           </div>
 
           {loading ? (
-            <div className="rounded-lg border border-gray-200 bg-white p-4 text-gray-600 text-sm">
-              Loading portfolio data
-            </div>
+            <>
+              {/* summary stat cards */}
+              <div className="mb-6 grid gap-4 sm:grid-cols-2">
+                {[0, 1].map((i) => (
+                  <div key={i} className="rounded-lg border border-gray-200 bg-white p-4">
+                    <Skeleton className="mb-2 h-3 w-24 rounded bg-gray-100" />
+                    <Skeleton className="h-8 w-32 rounded bg-gray-100" />
+                  </div>
+                ))}
+              </div>
+
+              {/* position card skeletons */}
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                    <Skeleton className="mb-3 h-5 w-40 rounded bg-gray-100" />
+                    <div className="mb-3 flex items-center gap-2">
+                      <Skeleton className="h-6 w-6 rounded bg-gray-100" />
+                      <Skeleton className="h-4 w-28 rounded bg-gray-100" />
+                      <Skeleton className="h-5 w-10 rounded-full bg-gray-100" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Skeleton className="h-14 rounded-lg bg-gray-100" />
+                      <Skeleton className="h-14 rounded-lg bg-gray-100" />
+                      <Skeleton className="h-14 rounded-lg bg-gray-100" />
+                      <Skeleton className="h-14 rounded-lg bg-gray-100" />
+                    </div>
+                    <div className="mt-4 flex items-center justify-between border-gray-100 border-t pt-3">
+                      <Skeleton className="h-3 w-32 rounded bg-gray-100" />
+                      <Skeleton className="h-8 w-14 rounded-md bg-gray-100" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* parlay teams skeletons */}
+              <div className="mt-8">
+                <Skeleton className="mb-3 h-4 w-32 rounded bg-gray-100" />
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {[0, 1].map((i) => (
+                    <div key={i} className="rounded-2xl border border-gray-200 bg-white p-4">
+                      <Skeleton className="mb-2 h-5 w-36 rounded bg-gray-100" />
+                      <div className="mb-2 flex gap-2">
+                        <Skeleton className="h-5 w-20 rounded-full bg-gray-100" />
+                        <Skeleton className="h-5 w-28 rounded-full bg-gray-100" />
+                      </div>
+                      <Skeleton className="mb-2 h-4 w-16 rounded bg-gray-100" />
+                      <div className="flex gap-1.5">
+                        <Skeleton className="h-6 w-16 rounded-full bg-gray-100" />
+                        <Skeleton className="h-6 w-16 rounded-full bg-gray-100" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
           ) : (
             <>
               <div className="mb-6 grid gap-4 sm:grid-cols-2">
@@ -1930,35 +1984,42 @@ const PortfolioPage = () => {
               />
             </div>
 
-            <button
-              type="button"
-              disabled={
-                loadingSellDetail ||
-                selling ||
-                !sellDetail ||
-                selectedSellPrice <= 0 ||
-                sellShares <= 0
-              }
-              onClick={() => void handleConfirmSell()}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span>Confirm SELL</span>
-              <span>
-                {sellDetail ? `$${selectedSellPrice.toFixed(2)}` : '--'}
-              </span>
-            </button>
+            {loadingSellDetail ? (
+              <div className="space-y-3">
+                <Skeleton className="h-10 w-full rounded-lg bg-violet-100" />
+                <Skeleton className="h-4 w-56 rounded bg-violet-100" />
+                <Skeleton className="h-4 w-full rounded bg-violet-100" />
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={
+                    selling ||
+                    !sellDetail ||
+                    selectedSellPrice <= 0 ||
+                    sellShares <= 0
+                  }
+                  onClick={() => void handleConfirmSell()}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span>Confirm SELL</span>
+                  <span>${selectedSellPrice.toFixed(2)}</span>
+                </button>
 
-            <p className="text-sm text-violet-700">
-              Current market price ({sellPosition?.buySide ?? '--'}):{' '}
-              {sellDetail ? `$${selectedSellPrice.toFixed(2)}` : '--'}
-            </p>
+                <p className="text-sm text-violet-700">
+                  Current market price ({sellPosition?.buySide ?? '--'}):{' '}
+                  ${selectedSellPrice.toFixed(2)}
+                </p>
 
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-violet-900">Expected Proceeds</p>
-              <p className="font-semibold text-sm text-violet-950">
-                ${expectedSellValue.toFixed(2)}
-              </p>
-            </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-violet-900">Expected Proceeds</p>
+                  <p className="font-semibold text-sm text-violet-950">
+                    ${expectedSellValue.toFixed(2)}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

@@ -5,6 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@starter/ui/components/shadcn/dialog';
+import { Skeleton } from '@starter/ui/components/shadcn/skeleton';
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -707,8 +708,21 @@ const DashboardPage = () => {
         </div>
 
         {loading ? (
-          <div className="landing-panel p-6 text-sm text-violet-900">
-            Loading Polymarket FIFA markets...
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="landing-panel p-6">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <Skeleton className="h-6 w-40 rounded-md bg-violet-100" />
+                  <Skeleton className="h-5 w-16 rounded-full bg-violet-100" />
+                </div>
+                <Skeleton className="mb-4 h-4 w-28 rounded-md bg-violet-100" />
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-9 w-full rounded-lg bg-violet-100" />
+                  <Skeleton className="h-9 w-full rounded-lg bg-violet-100" />
+                  <Skeleton className="h-9 w-full rounded-lg bg-violet-100" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : marketCards.length > 0 ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -825,54 +839,57 @@ const DashboardPage = () => {
               Available balance: ${availableBalance.toFixed(2)}
             </p>
 
-            <div className="space-y-3">
-              <p className="text-sm text-violet-900">Pick Side</p>
-              <div className="grid grid-cols-2 gap-2">
+            {loadingDetail ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <Skeleton className="h-10 w-full rounded-md bg-violet-100" />
+                  <Skeleton className="h-10 w-full rounded-md bg-violet-100" />
+                </div>
+                <Skeleton className="h-4 w-48 rounded bg-violet-100" />
+                <Skeleton className="h-10 w-full rounded-lg bg-violet-100" />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-violet-900">Pick Side</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPickSide('YES')}
+                    className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
+                  >
+                    YES{' '}
+                    {marketDetail ? `$${marketDetail.yesPrice.toFixed(2)}` : '--'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPickSide('NO')}
+                    className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
+                  >
+                    NO{' '}
+                    {marketDetail ? `$${marketDetail.noPrice.toFixed(2)}` : '--'}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-violet-900">
+                    Expected Max Payout ({pickSide})
+                  </p>
+                  <p className="font-semibold text-sm text-violet-950">
+                    ${expectedMaxPayout.toFixed(2)}
+                  </p>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => setPickSide('YES')}
-                  className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
+                  disabled={buying || selectedPrice <= 0 || stake <= 0}
+                  onClick={() => void handleConfirmBuy()}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  YES{' '}
-                  {marketDetail ? `$${marketDetail.yesPrice.toFixed(2)}` : '--'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPickSide('NO')}
-                  className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
-                >
-                  NO{' '}
-                  {marketDetail ? `$${marketDetail.noPrice.toFixed(2)}` : '--'}
+                  <span>Confirm BUY {pickSide}</span>
+                  <span>${selectedPrice.toFixed(2)}</span>
                 </button>
               </div>
-
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-violet-900">
-                  Expected Max Payout ({pickSide})
-                </p>
-                <p className="font-semibold text-sm text-violet-950">
-                  ${expectedMaxPayout.toFixed(2)}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              disabled={
-                loadingDetail ||
-                buying ||
-                !marketDetail ||
-                selectedPrice <= 0 ||
-                stake <= 0
-              }
-              onClick={() => void handleConfirmBuy()}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span>Confirm BUY {pickSide}</span>
-              <span>
-                {marketDetail ? `$${selectedPrice.toFixed(2)}` : '--'}
-              </span>
-            </button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
