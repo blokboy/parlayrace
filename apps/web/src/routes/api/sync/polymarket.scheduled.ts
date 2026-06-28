@@ -15,14 +15,26 @@ export const Route = createFileRoute('/api/sync/polymarket/scheduled')({
           }
         }
 
-        const result = await syncPolyMarketMarkets({ limit: 1000, batchSize: 50 });
+        try {
+          const result = await syncPolyMarketMarkets({ limit: 1000, batchSize: 50 });
 
-        return Response.json({
-          synced: result.synced,
-          count: result.count,
-          mode: 'scheduled',
-          sourceProvider: 'POLYMARKET',
-        });
+          return Response.json({
+            synced: result.observability.providerHealthy,
+            count: result.jobs.catalog.success,
+            mode: 'scheduled',
+            ...result,
+          });
+        } catch (error) {
+          return Response.json(
+            {
+              synced: false,
+              mode: 'scheduled',
+              error: error instanceof Error ? error.message : 'Sync failed',
+              sourceProvider: 'POLYMARKET',
+            },
+            { status: 500 }
+          );
+        }
       },
     },
   },

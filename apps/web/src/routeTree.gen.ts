@@ -19,6 +19,7 @@ import { Route as ApiUserProfileRouteImport } from './routes/api/user-profile'
 import { Route as ApiTeamColorsRouteImport } from './routes/api/team-colors'
 import { Route as ApiParlayTeamsRouteImport } from './routes/api/parlay-teams'
 import { Route as ApiPaperPortfolioRouteImport } from './routes/api/paper-portfolio'
+import { Route as ApiMlbMarketsRouteImport } from './routes/api/mlb-markets'
 import { Route as ApiMarketsRouteImport } from './routes/api/markets'
 import { Route as ApiLiveEventTimeRouteImport } from './routes/api/live-event-time'
 import { Route as PublicTermsRouteImport } from './routes/_public/terms'
@@ -28,6 +29,7 @@ import { Route as PublicDashboardRouteImport } from './routes/_public/dashboard'
 import { Route as ApiSyncPolymarketRouteImport } from './routes/api/sync/polymarket'
 import { Route as ApiMarketsMarketIdRouteImport } from './routes/api/markets.$marketId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiSyncPolymarketScheduledRouteImport } from './routes/api/sync/polymarket.scheduled'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -78,6 +80,11 @@ const ApiPaperPortfolioRoute = ApiPaperPortfolioRouteImport.update({
   path: '/api/paper-portfolio',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMlbMarketsRoute = ApiMlbMarketsRouteImport.update({
+  id: '/api/mlb-markets',
+  path: '/api/mlb-markets',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMarketsRoute = ApiMarketsRouteImport.update({
   id: '/api/markets',
   path: '/api/markets',
@@ -123,6 +130,12 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSyncPolymarketScheduledRoute =
+  ApiSyncPolymarketScheduledRouteImport.update({
+    id: '/scheduled',
+    path: '/scheduled',
+    getParentRoute: () => ApiSyncPolymarketRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof PublicIndexRoute
@@ -133,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/terms': typeof PublicTermsRoute
   '/api/live-event-time': typeof ApiLiveEventTimeRoute
   '/api/markets': typeof ApiMarketsRouteWithChildren
+  '/api/mlb-markets': typeof ApiMlbMarketsRoute
   '/api/paper-portfolio': typeof ApiPaperPortfolioRoute
   '/api/parlay-teams': typeof ApiParlayTeamsRoute
   '/api/team-colors': typeof ApiTeamColorsRoute
@@ -142,7 +156,8 @@ export interface FileRoutesByFullPath {
   '/auth/username': typeof AuthUsernameRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
-  '/api/sync/polymarket': typeof ApiSyncPolymarketRoute
+  '/api/sync/polymarket': typeof ApiSyncPolymarketRouteWithChildren
+  '/api/sync/polymarket/scheduled': typeof ApiSyncPolymarketScheduledRoute
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRouteWithChildren
@@ -152,6 +167,7 @@ export interface FileRoutesByTo {
   '/terms': typeof PublicTermsRoute
   '/api/live-event-time': typeof ApiLiveEventTimeRoute
   '/api/markets': typeof ApiMarketsRouteWithChildren
+  '/api/mlb-markets': typeof ApiMlbMarketsRoute
   '/api/paper-portfolio': typeof ApiPaperPortfolioRoute
   '/api/parlay-teams': typeof ApiParlayTeamsRoute
   '/api/team-colors': typeof ApiTeamColorsRoute
@@ -162,7 +178,8 @@ export interface FileRoutesByTo {
   '/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
-  '/api/sync/polymarket': typeof ApiSyncPolymarketRoute
+  '/api/sync/polymarket': typeof ApiSyncPolymarketRouteWithChildren
+  '/api/sync/polymarket/scheduled': typeof ApiSyncPolymarketScheduledRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -174,6 +191,7 @@ export interface FileRoutesById {
   '/_public/terms': typeof PublicTermsRoute
   '/api/live-event-time': typeof ApiLiveEventTimeRoute
   '/api/markets': typeof ApiMarketsRouteWithChildren
+  '/api/mlb-markets': typeof ApiMlbMarketsRoute
   '/api/paper-portfolio': typeof ApiPaperPortfolioRoute
   '/api/parlay-teams': typeof ApiParlayTeamsRoute
   '/api/team-colors': typeof ApiTeamColorsRoute
@@ -184,7 +202,8 @@ export interface FileRoutesById {
   '/_public/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
-  '/api/sync/polymarket': typeof ApiSyncPolymarketRoute
+  '/api/sync/polymarket': typeof ApiSyncPolymarketRouteWithChildren
+  '/api/sync/polymarket/scheduled': typeof ApiSyncPolymarketScheduledRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -197,6 +216,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/api/live-event-time'
     | '/api/markets'
+    | '/api/mlb-markets'
     | '/api/paper-portfolio'
     | '/api/parlay-teams'
     | '/api/team-colors'
@@ -207,6 +227,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/markets/$marketId'
     | '/api/sync/polymarket'
+    | '/api/sync/polymarket/scheduled'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/auth'
@@ -216,6 +237,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/api/live-event-time'
     | '/api/markets'
+    | '/api/mlb-markets'
     | '/api/paper-portfolio'
     | '/api/parlay-teams'
     | '/api/team-colors'
@@ -227,6 +249,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/markets/$marketId'
     | '/api/sync/polymarket'
+    | '/api/sync/polymarket/scheduled'
   id:
     | '__root__'
     | '/_public'
@@ -237,6 +260,7 @@ export interface FileRouteTypes {
     | '/_public/terms'
     | '/api/live-event-time'
     | '/api/markets'
+    | '/api/mlb-markets'
     | '/api/paper-portfolio'
     | '/api/parlay-teams'
     | '/api/team-colors'
@@ -248,6 +272,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/markets/$marketId'
     | '/api/sync/polymarket'
+    | '/api/sync/polymarket/scheduled'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -255,13 +280,14 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRouteWithChildren
   ApiLiveEventTimeRoute: typeof ApiLiveEventTimeRoute
   ApiMarketsRoute: typeof ApiMarketsRouteWithChildren
+  ApiMlbMarketsRoute: typeof ApiMlbMarketsRoute
   ApiPaperPortfolioRoute: typeof ApiPaperPortfolioRoute
   ApiParlayTeamsRoute: typeof ApiParlayTeamsRoute
   ApiTeamColorsRoute: typeof ApiTeamColorsRoute
   ApiUserProfileRoute: typeof ApiUserProfileRoute
   ApiUsersRoute: typeof ApiUsersRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  ApiSyncPolymarketRoute: typeof ApiSyncPolymarketRoute
+  ApiSyncPolymarketRoute: typeof ApiSyncPolymarketRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -336,6 +362,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPaperPortfolioRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mlb-markets': {
+      id: '/api/mlb-markets'
+      path: '/api/mlb-markets'
+      fullPath: '/api/mlb-markets'
+      preLoaderRoute: typeof ApiMlbMarketsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/markets': {
       id: '/api/markets'
       path: '/api/markets'
@@ -399,6 +432,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/sync/polymarket/scheduled': {
+      id: '/api/sync/polymarket/scheduled'
+      path: '/scheduled'
+      fullPath: '/api/sync/polymarket/scheduled'
+      preLoaderRoute: typeof ApiSyncPolymarketScheduledRouteImport
+      parentRoute: typeof ApiSyncPolymarketRoute
+    }
   }
 }
 
@@ -445,18 +485,30 @@ const ApiMarketsRouteWithChildren = ApiMarketsRoute._addFileChildren(
   ApiMarketsRouteChildren,
 )
 
+interface ApiSyncPolymarketRouteChildren {
+  ApiSyncPolymarketScheduledRoute: typeof ApiSyncPolymarketScheduledRoute
+}
+
+const ApiSyncPolymarketRouteChildren: ApiSyncPolymarketRouteChildren = {
+  ApiSyncPolymarketScheduledRoute: ApiSyncPolymarketScheduledRoute,
+}
+
+const ApiSyncPolymarketRouteWithChildren =
+  ApiSyncPolymarketRoute._addFileChildren(ApiSyncPolymarketRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   PublicRoute: PublicRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
   ApiLiveEventTimeRoute: ApiLiveEventTimeRoute,
   ApiMarketsRoute: ApiMarketsRouteWithChildren,
+  ApiMlbMarketsRoute: ApiMlbMarketsRoute,
   ApiPaperPortfolioRoute: ApiPaperPortfolioRoute,
   ApiParlayTeamsRoute: ApiParlayTeamsRoute,
   ApiTeamColorsRoute: ApiTeamColorsRoute,
   ApiUserProfileRoute: ApiUserProfileRoute,
   ApiUsersRoute: ApiUsersRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  ApiSyncPolymarketRoute: ApiSyncPolymarketRoute,
+  ApiSyncPolymarketRoute: ApiSyncPolymarketRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
