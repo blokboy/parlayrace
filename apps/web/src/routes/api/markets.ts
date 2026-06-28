@@ -155,9 +155,9 @@ const endOfDayUtc = (value: Date) =>
 const getWindow = () => {
   const now = new Date();
   const from = startOfDayUtc(now);
-  const tomorrow = new Date(from);
-  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-  const to = endOfDayUtc(tomorrow);
+  const fourthDay = new Date(from);
+  fourthDay.setUTCDate(fourthDay.getUTCDate() + 3);
+  const to = endOfDayUtc(fourthDay);
   return { from, to };
 };
 
