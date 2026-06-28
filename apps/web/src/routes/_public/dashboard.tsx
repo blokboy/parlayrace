@@ -845,6 +845,17 @@ const DashboardPage = () => {
   // MLB markets are two-outcome (no draw), so picking a team is an implicit
   // "YES" on that team — there's no YES/NO choice to surface.
   const isMlbTrade = selectedTrade?.category === 'mlb-games';
+
+  // Color the modal's action buttons with the chosen team's palette.
+  const selectedTeamName =
+    selectedTrade?.side === 'home'
+      ? selectedTrade.homeTeam
+      : selectedTrade?.side === 'away'
+        ? selectedTrade.awayTeam
+        : null;
+  const selectedPalette = getTeamButtonPalette({
+    color: selectedTeamName ? (teamBrands[selectedTeamName]?.color ?? null) : null,
+  });
   const selectedPrice =
     pickSide === 'YES'
       ? (marketDetail?.yesPrice ?? 0)
@@ -974,10 +985,10 @@ const DashboardPage = () => {
                   ? setActiveLeagues(new Set())
                   : toggleLeague(badge.key as LeagueCategory)
               }
-              className={`rounded-full border px-3 py-1 font-semibold text-xs uppercase tracking-wide transition ${
+              className={`rounded-full border bg-white px-3 py-1 font-semibold text-xs uppercase tracking-wide transition ${
                 badge.active
-                  ? 'border-violet-500 bg-violet-600 text-white'
-                  : 'border-violet-200 bg-white text-violet-700 hover:border-violet-300 hover:bg-violet-50'
+                  ? 'border-violet-500 text-violet-900 ring-1 ring-violet-400'
+                  : 'border-violet-200 text-violet-500 hover:border-violet-300 hover:bg-violet-50'
               }`}
             >
               {badge.label}
@@ -1148,7 +1159,20 @@ const DashboardPage = () => {
                       <button
                         type="button"
                         onClick={() => setPickSide('YES')}
-                        className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
+                        className="rounded-full border px-3 py-2 font-semibold text-sm transition"
+                        style={
+                          pickSide === 'YES'
+                            ? {
+                                backgroundColor: selectedPalette.background,
+                                color: selectedPalette.color,
+                                borderColor: selectedPalette.border,
+                              }
+                            : {
+                                backgroundColor: '#ffffff',
+                                color: selectedPalette.border,
+                                borderColor: selectedPalette.border,
+                              }
+                        }
                       >
                         YES{' '}
                         {marketDetail
@@ -1158,7 +1182,20 @@ const DashboardPage = () => {
                       <button
                         type="button"
                         onClick={() => setPickSide('NO')}
-                        className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
+                        className="rounded-full border px-3 py-2 font-semibold text-sm transition"
+                        style={
+                          pickSide === 'NO'
+                            ? {
+                                backgroundColor: selectedPalette.background,
+                                color: selectedPalette.color,
+                                borderColor: selectedPalette.border,
+                              }
+                            : {
+                                backgroundColor: '#ffffff',
+                                color: selectedPalette.border,
+                                borderColor: selectedPalette.border,
+                              }
+                        }
                       >
                         NO{' '}
                         {marketDetail
@@ -1182,7 +1219,12 @@ const DashboardPage = () => {
                   type="button"
                   disabled={buying || selectedPrice <= 0 || stake <= 0}
                   onClick={() => void handleConfirmBuy()}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{
+                    backgroundColor: selectedPalette.background,
+                    color: selectedPalette.color,
+                    borderColor: selectedPalette.border,
+                  }}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <span>
                     {isMlbTrade
