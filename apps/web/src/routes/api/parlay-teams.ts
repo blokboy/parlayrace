@@ -17,7 +17,9 @@ import { getLegSidePrice } from '@/server/polymarket/prices';
 type PositionSide = 'home' | 'draw' | 'away';
 type BuySide = 'YES' | 'NO';
 type ParlayStatus = 'ACTIVE' | 'LOST' | 'WON';
-type LegResolution = 'PENDING' | 'WON' | 'LOST';
+// ROLLED_OVER = the leg owner cashed the leg out early into the next leg; the
+// underlying result is then ignored so the parlay stays alive.
+type LegResolution = 'PENDING' | 'WON' | 'LOST' | 'ROLLED_OVER';
 
 type PaperPosition = {
   id: string;
@@ -687,7 +689,9 @@ const syncParlayStates = async (teamIds: string[]) => {
     const legState = parlayShares.map((share) => {
       const position = positionById.get(share.positionId) ?? null;
       const persisted =
-        share.result === 'WON' || share.result === 'LOST'
+        share.result === 'WON' ||
+        share.result === 'LOST' ||
+        share.result === 'ROLLED_OVER'
           ? (share.result as LegResolution)
           : null;
       const result =
@@ -886,10 +890,13 @@ const syncParlayStates = async (teamIds: string[]) => {
       continue;
     }
 
-    // 4) All legs won → claimable is the sum of every terminal leg's value
-    // (won legs whose value didn't roll forward into another leg).
-    const allWon = legState.every((leg) => leg.result === 'WON');
-    if (allWon) {
+    // 4) Every leg settled without a loss (won or manually rolled over) →
+    // claimable is the sum of every terminal leg's value (legs whose value
+    // didn't roll forward into another leg).
+    const allSettled = legState.every(
+      (leg) => leg.result === 'WON' || leg.result === 'ROLLED_OVER'
+    );
+    if (allSettled) {
       let claimableAmount = 0;
       for (const leg of legState) {
         const rolledForward = parlayRollovers.some(
@@ -1359,6 +1366,7 @@ export const Route = createFileRoute('/api/parlay-teams')({
           teamId?: string;
           positionId?: string;
           shares?: number;
+          legId?: string;
         };
 
         if (!body.teamId) {
@@ -1715,6 +1723,180 @@ export const Route = createFileRoute('/api/parlay-teams')({
             amount: claimAmount,
             claimedAt: new Date(),
           });
+        } else if (body.action === 'manual-rollover') {
+          if (!body.legId) {
+            return Response.json(
+              { ok: false, error: 'INVALID_ROLLOVER' },
+              { status: 400 }
+            );
+          }
+
+          const teamParlays = await db.query.parlayTeamParlay.findMany({
+            where: (table, { eq: equals }) => equals(table.teamId, teamId),
+          });
+          const activeParlay = teamParlays.find(
+            (parlay) => parlay.status === 'ACTIVE'
+          );
+
+          if (!activeParlay) {
+            return Response.json(
+              { ok: false, error: 'PARLAY_NOT_ACTIVE' },
+              { status: 400 }
+            );
+          }
+
+          const parlayShares = await db.query.parlayTeamParlayShare.findMany({
+            where: (table, { eq: equals }) =>
+              equals(table.parlayId, activeParlay.id),
+          });
+
+          const leg = parlayShares.find((share) => share.id === body.legId);
+          if (!leg) {
+            return Response.json(
+              { ok: false, error: 'LEG_NOT_FOUND' },
+              { status: 404 }
+            );
+          }
+
+          // Only the leg's owner can roll it over.
+          if (leg.addedByUserId !== user.id) {
+            return Response.json(
+              { ok: false, error: 'NOT_LEG_OWNER' },
+              { status: 403 }
+            );
+          }
+
+          if (
+            leg.result === 'WON' ||
+            leg.result === 'LOST' ||
+            leg.result === 'ROLLED_OVER'
+          ) {
+            return Response.json(
+              { ok: false, error: 'LEG_ALREADY_RESOLVED' },
+              { status: 400 }
+            );
+          }
+
+          // Build positions for every team member so legs can be priced.
+          const teamMembers = await db.query.parlayTeamMember.findMany({
+            where: (table, { eq: equals }) => equals(table.teamId, teamId),
+            columns: { userId: true },
+          });
+          const memberPortfolios = await db.query.paperPortfolio.findMany({
+            where: (table, { inArray }) =>
+              inArray(
+                table.userId,
+                teamMembers.map((member) => member.userId)
+              ),
+            columns: { positions: true },
+          });
+          const positionById = new Map<string, PaperPosition>();
+          for (const portfolio of memberPortfolios) {
+            const positions = Array.isArray(portfolio.positions)
+              ? (portfolio.positions as PaperPosition[])
+              : [];
+            for (const position of positions) {
+              if (!positionById.has(position.id)) {
+                positionById.set(position.id, position);
+              }
+            }
+          }
+
+          const existingRollovers =
+            await db.query.parlayTeamParlayRollover.findMany({
+              where: (table, { eq: equals }) =>
+                equals(table.parlayId, activeParlay.id),
+            });
+
+          // The whole leg — principal plus anything already rolled in — is
+          // cashed out at the current market price.
+          const rolledIn = existingRollovers
+            .filter((rollover) => rollover.targetShareId === leg.id)
+            .reduce((sum, rollover) => sum + rollover.sharesAdded, 0);
+          const legEffectiveShares = roundToCents(leg.shares + rolledIn);
+          const currentPrice = await legPriceForPosition(
+            leg.marketId,
+            positionById.get(leg.positionId) ?? null
+          );
+
+          if (!currentPrice || currentPrice <= 0) {
+            return Response.json(
+              { ok: false, error: 'PRICE_UNAVAILABLE' },
+              { status: 400 }
+            );
+          }
+
+          const value = roundToCents(legEffectiveShares * currentPrice);
+          if (value <= 0) {
+            return Response.json(
+              { ok: false, error: 'NOTHING_TO_ROLL' },
+              { status: 400 }
+            );
+          }
+
+          // Target = the next leg that hasn't started yet (same rule as the
+          // automatic rollover), excluding lost/already-rolled legs.
+          const nowMs = Date.now();
+          const target = parlayShares
+            .filter((candidate) => {
+              if (candidate.id === leg.id) return false;
+              if (candidate.sequence <= leg.sequence) return false;
+              if (
+                candidate.result === 'LOST' ||
+                candidate.result === 'ROLLED_OVER'
+              ) {
+                return false;
+              }
+              const candidatePosition = positionById.get(candidate.positionId);
+              const kickoffMs = candidatePosition
+                ? new Date(candidatePosition.kickoff).getTime()
+                : Number.NaN;
+              return Number.isFinite(kickoffMs) && kickoffMs > nowMs;
+            })
+            .sort((a, b) => a.sequence - b.sequence)[0];
+
+          if (!target) {
+            return Response.json(
+              {
+                ok: false,
+                error: 'NO_TARGET_LEG',
+                message: 'No upcoming leg is available to roll this leg into.',
+              },
+              { status: 400 }
+            );
+          }
+
+          const targetPrice = await legPriceForPosition(
+            target.marketId,
+            positionById.get(target.positionId) ?? null
+          );
+          if (!targetPrice || targetPrice <= 0) {
+            return Response.json(
+              { ok: false, error: 'PRICE_UNAVAILABLE' },
+              { status: 400 }
+            );
+          }
+
+          await db.insert(parlayTeamParlayRollover).values({
+            parlayId: activeParlay.id,
+            teamId,
+            sourceShareId: leg.id,
+            targetShareId: target.id,
+            amount: value,
+            targetPrice,
+            sharesAdded: roundToCents(value / targetPrice),
+          });
+
+          // Logged as ROLLED_OVER (not LOST) so the parlay stays alive even if
+          // the underlying bet would have lost.
+          await db
+            .update(parlayTeamParlayShare)
+            .set({
+              result: 'ROLLED_OVER',
+              resolvedAt: new Date(),
+              resolvedPrice: currentPrice,
+            })
+            .where(eq(parlayTeamParlayShare.id, leg.id));
         } else {
           return Response.json(
             { ok: false, error: 'INVALID_ACTION' },

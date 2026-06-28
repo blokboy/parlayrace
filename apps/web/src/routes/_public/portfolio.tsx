@@ -60,7 +60,7 @@ type TeamCommittedLeg = {
   positionSide: PositionSide;
   buySide: BuySide;
   placedAt: string;
-  result: 'PENDING' | 'WON' | 'LOST';
+  result: 'PENDING' | 'WON' | 'LOST' | 'ROLLED_OVER';
   principalShares: number;
   rolledInShares: number;
   effectiveShares: number;
@@ -207,6 +207,10 @@ const getLegBadgeClassName = (
 
   if (leg.result === 'LOST') {
     return 'border-red-200 text-red-700';
+  }
+
+  if (leg.result === 'ROLLED_OVER') {
+    return 'border-amber-200 text-amber-700';
   }
 
   if (status?.hasStarted) {
@@ -419,6 +423,34 @@ const claimParlayTeam = async (teamId: string): Promise<ParlayTeam | null> => {
   return payload.team ?? null;
 };
 
+const rolloverParlayLeg = async (
+  teamId: string,
+  legId: string
+): Promise<ParlayTeam | null> => {
+  const response = await fetch('/api/parlay-teams', {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      action: 'manual-rollover',
+      teamId,
+      legId,
+    }),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as {
+    team?: ParlayTeam;
+  };
+
+  return payload.team ?? null;
+};
+
 const searchUsersByUsername = async (query: string): Promise<SearchUser[]> => {
   const response = await fetch(`/api/users?q=${encodeURIComponent(query)}`, {
     method: 'GET',
@@ -489,6 +521,7 @@ const PortfolioPage = () => {
     Record<string, LiveStatus>
   >({});
   const teamLegLiveStatusesRef = useRef<Record<string, LiveStatus>>({});
+  const [rolloverLegId, setRolloverLegId] = useState<string | null>(null);
   const [sellPosition, setSellPosition] = useState<PaperPosition | null>(null);
   const [sellDetail, setSellDetail] = useState<MarketDetail | null>(null);
   const [sellShares, setSellShares] = useState(0);
@@ -1073,6 +1106,31 @@ const PortfolioPage = () => {
     );
     setSelectedParlayTeam(nextTeam);
     setTeamModalFeedback(`Claimed $${nextTeam.claimAmount.toFixed(2)}.`);
+  };
+
+  const handleRolloverLeg = async (legId: string) => {
+    if (!selectedParlayTeam || committingShare) {
+      return;
+    }
+
+    setCommittingShare(true);
+    setTeamModalFeedback(null);
+
+    const nextTeam = await rolloverParlayLeg(selectedParlayTeam.id, legId);
+
+    setCommittingShare(false);
+    setRolloverLegId(null);
+
+    if (!nextTeam) {
+      setTeamModalFeedback('Unable to roll over this leg.');
+      return;
+    }
+
+    setParlayTeams((current) =>
+      current.map((team) => (team.id === nextTeam.id ? nextTeam : team))
+    );
+    setSelectedParlayTeam(nextTeam);
+    setTeamModalFeedback('Leg rolled over into the next leg.');
   };
 
   const openSellModal = (position: PaperPosition) => {
@@ -1734,10 +1792,43 @@ const PortfolioPage = () => {
                             <p className="font-medium text-gray-900 text-sm">
                               {leg.cardTitle}
                             </p>
-                            {leg.rolledInShares > 0 ? (
-                              <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 font-semibold text-[11px] text-violet-700">
-                                +{leg.rolledInShares.toFixed(2)} rolled in
-                              </span>
+                            {leg.result === 'PENDING' &&
+                            leg.addedByUsername === username ? (
+                              rolloverLegId === leg.id ? (
+                                <div className="flex flex-col items-end gap-1.5">
+                                  <div className="flex gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void handleRolloverLeg(leg.id)
+                                      }
+                                      disabled={committingShare}
+                                      className="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 font-semibold text-[11px] text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      Submit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setRolloverLegId(null)}
+                                      className="rounded-full border border-gray-300 bg-white px-2.5 py-0.5 font-semibold text-[11px] text-gray-600"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                  <p className="max-w-[180px] text-right text-[10px] text-amber-700 leading-tight">
+                                    WARNING! You are about to close out your leg
+                                    and roll your profits into the next leg.
+                                  </p>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setRolloverLegId(leg.id)}
+                                  className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 font-semibold text-[11px] text-violet-700"
+                                >
+                                  Rollover
+                                </button>
+                              )
                             ) : null}
                           </div>
 
