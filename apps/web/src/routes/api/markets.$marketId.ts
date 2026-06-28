@@ -3,8 +3,8 @@ import { createFileRoute } from '@tanstack/react-router';
 type PolymarketMarket = {
   id: string | number;
   question: string;
-  outcomes?: string;
-  outcomePrices?: string;
+  outcomes?: string | string[];
+  outcomePrices?: string | string[];
   updatedAt?: string;
 };
 
@@ -16,14 +16,12 @@ type MarketDetailPayload = {
   updatedAt: string | null;
 };
 
-const parseJsonArray = (value: string | undefined): string[] => {
-  if (!value) {
-    return [];
-  }
-
+const parseJsonArray = (value: string | string[] | null | undefined): string[] => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map(String);
   try {
-    const parsed = JSON.parse(value) as string[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as unknown[]).map(String) : [];
   } catch {
     return [];
   }
@@ -124,26 +122,13 @@ const pickMarketForSide = (
 const fetchMarketsForEvent = async (
   eventId: string
 ): Promise<PolymarketMarket[]> => {
-  // Prefer the /markets endpoint — it reliably includes outcomePrices.
-  const marketsRes = await fetch(
-    `https://gamma-api.polymarket.com/markets?event_id=${encodeURIComponent(eventId)}&limit=20`
-  );
-
-  if (marketsRes.ok) {
-    const data = (await marketsRes.json()) as PolymarketMarket[];
-    if (Array.isArray(data) && data.length > 0) {
-      return data;
-    }
-  }
-
-  // Fallback: fetch the event and extract embedded markets.
+  // Use the single-event endpoint — it is event-scoped and reliably returns
+  // embedded markets with outcomePrices for that specific event.
   const eventRes = await fetch(
     `https://gamma-api.polymarket.com/events/${encodeURIComponent(eventId)}`
   );
 
-  if (!eventRes.ok) {
-    return [];
-  }
+  if (!eventRes.ok) return [];
 
   const event = (await eventRes.json()) as { markets?: PolymarketMarket[] };
   return event.markets ?? [];

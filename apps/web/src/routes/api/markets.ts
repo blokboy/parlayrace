@@ -3,8 +3,10 @@ import { createFileRoute } from '@tanstack/react-router';
 type PolymarketMarket = {
   id: string | number;
   question: string;
-  outcomes?: string;
-  outcomePrices?: string;
+  // The gamma API may return these as a JSON-encoded string OR as a native
+  // array (already parsed from the HTTP response body). Handle both.
+  outcomes?: string | string[];
+  outcomePrices?: string | string[];
   updatedAt?: string;
 };
 
@@ -36,6 +38,11 @@ type MarketLeg = {
   noPrice: number;
 };
 
+type TeamBranding = {
+  logo: string;
+  color: string | null;
+};
+
 type MarketItem = {
   id: string;
   sourceProvider: 'POLYMARKET';
@@ -45,15 +52,18 @@ type MarketItem = {
   homeTeam: string;
   awayTeam: string;
   legs: [MarketLeg, MarketLeg, MarketLeg];
+  homeBranding: TeamBranding;
+  awayBranding: TeamBranding;
 };
 
 // ─── price extraction ───────────────────────────────────────────────────────
 
-const parseJsonArray = (value: string | undefined): string[] => {
+const parseJsonArray = (value: string | string[] | null | undefined): string[] => {
   if (!value) return [];
+  if (Array.isArray(value)) return value.map(String);
   try {
-    const parsed = JSON.parse(value) as string[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as unknown[]).map(String) : [];
   } catch {
     return [];
   }
@@ -217,6 +227,8 @@ const toMarketItem = (event: PolymarketEvent): MarketItem | null => {
     kickoff: event.endDate,
     homeTeam: home.name,
     awayTeam: away.name,
+    homeBranding: { logo: home.logo ?? '', color: home.color ?? null },
+    awayBranding: { logo: away.logo ?? '', color: away.color ?? null },
     legs: [
       {
         id: `${eventId}:home`,

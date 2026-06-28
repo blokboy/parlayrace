@@ -26,6 +26,8 @@ type MarketItem = {
   homeTeam: string;
   awayTeam: string;
   legs: MarketLeg[];
+  homeBranding?: { logo: string; color: string | null };
+  awayBranding?: { logo: string; color: string | null };
 };
 
 type TeamBranding = {
@@ -571,16 +573,38 @@ const DashboardPage = () => {
 
       setMarkets(loadedMarkets);
 
+      // Seed team branding from data embedded in the Polymarket response.
+      // This covers MLB teams (and any FIFA teams whose colors Polymarket carries).
+      const embeddedBranding: Record<string, TeamBranding> = {};
+      for (const market of loadedMarkets) {
+        if (market.homeBranding?.logo || market.homeBranding?.color) {
+          embeddedBranding[market.homeTeam] = {
+            name: market.homeTeam,
+            logo: market.homeBranding.logo,
+            color: market.homeBranding.color,
+          };
+        }
+        if (market.awayBranding?.logo || market.awayBranding?.color) {
+          embeddedBranding[market.awayTeam] = {
+            name: market.awayTeam,
+            logo: market.awayBranding.logo,
+            color: market.awayBranding.color,
+          };
+        }
+      }
+
       const uniqueTeams = Array.from(
         new Set(
           loadedMarkets.flatMap((market) => [market.homeTeam, market.awayTeam])
         )
       );
 
-      const branding = await fetchTeamBranding(uniqueTeams);
+      // fetchTeamBranding covers FIFA national team colors/flags; merge over
+      // embedded data so dedicated entries take precedence where both exist.
+      const fetchedBranding = await fetchTeamBranding(uniqueTeams);
 
       if (!cancelled) {
-        setTeamBrands(branding);
+        setTeamBrands({ ...embeddedBranding, ...fetchedBranding });
         setLoading(false);
       }
     };

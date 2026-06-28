@@ -3,8 +3,8 @@ import { createFileRoute } from '@tanstack/react-router';
 type PolymarketMarket = {
   id: string | number;
   question: string;
-  outcomes?: string;
-  outcomePrices?: string;
+  outcomes?: string | string[];
+  outcomePrices?: string | string[];
   updatedAt?: string;
 };
 
@@ -36,6 +36,11 @@ type MarketLeg = {
   noPrice: number;
 };
 
+type TeamBranding = {
+  logo: string;
+  color: string | null;
+};
+
 type MlbMarketItem = {
   id: string;
   sourceProvider: 'POLYMARKET';
@@ -44,16 +49,19 @@ type MlbMarketItem = {
   kickoff: string;
   homeTeam: string;
   awayTeam: string;
+  homeBranding: TeamBranding;
+  awayBranding: TeamBranding;
   legs: MarketLeg[];
 };
 
 // ─── price extraction ────────────────────────────────────────────────────────
 
-const parseJsonArray = (value: string | undefined): string[] => {
+const parseJsonArray = (value: string | string[] | null | undefined): string[] => {
   if (!value) return [];
+  if (Array.isArray(value)) return value.map(String);
   try {
-    const parsed = JSON.parse(value) as string[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as unknown[]).map(String) : [];
   } catch {
     return [];
   }
@@ -197,6 +205,8 @@ const toMlbMarketItem = (event: PolymarketEvent): MlbMarketItem | null => {
     kickoff: event.endDate,
     homeTeam: home.name,
     awayTeam: away.name,
+    homeBranding: { logo: home.logo ?? '', color: home.color ?? null },
+    awayBranding: { logo: away.logo ?? '', color: away.color ?? null },
     legs: [
       {
         id: `${eventId}:home`,
