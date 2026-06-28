@@ -1,32 +1,5 @@
+import { db } from '@starter/backend/db';
 import { createFileRoute } from '@tanstack/react-router';
-
-type PolymarketMarket = {
-  id: string | number;
-  question: string;
-  outcomes?: string | string[];
-  outcomePrices?: string | string[];
-  updatedAt?: string;
-};
-
-type PolymarketTeam = {
-  name: string;
-  logo: string;
-  color: string | null;
-  ordering: string | null;
-};
-
-type PolymarketEvent = {
-  id: string | number;
-  title: string;
-  startDate: string;
-  endDate: string;
-  slug?: string;
-  seriesSlug?: string;
-  teams?: PolymarketTeam[] | null;
-  markets?: PolymarketMarket[];
-  active?: boolean;
-  closed?: boolean;
-};
 
 type MarketLeg = {
   id: string;
@@ -54,116 +27,26 @@ type MlbMarketItem = {
   legs: MarketLeg[];
 };
 
-// ─── price extraction ────────────────────────────────────────────────────────
-
-const parseJsonArray = (value: string | string[] | null | undefined): string[] => {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.map(String);
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? (parsed as unknown[]).map(String) : [];
-  } catch {
-    return [];
-  }
-};
-
 const roundToCents = (n: number) => Math.round(n * 100) / 100;
-
-const extractPrices = (
-  market: PolymarketMarket
-): { yesPrice: number; noPrice: number } => {
-  const outcomes = parseJsonArray(market.outcomes);
-  const prices = parseJsonArray(market.outcomePrices).map(Number);
-
-  if (outcomes.length === 0 || prices.length === 0) {
-    return { yesPrice: 0.5, noPrice: 0.5 };
-  }
-
-  const yesIdx = outcomes.findIndex((o) => o.toLowerCase() === 'yes');
-  const yesPriceRaw = yesIdx >= 0 ? prices[yesIdx] : prices[0];
-  const yesPrice = Number.isFinite(yesPriceRaw) ? yesPriceRaw : 0.5;
-
-  return {
-    yesPrice: roundToCents(yesPrice),
-    noPrice: roundToCents(Math.max(0, Math.min(1, 1 - yesPrice))),
-  };
-};
-
-// ─── market classification (home/away only — no draw in baseball) ────────────
-
-const classifyMarket = (
-  question: string,
-  homeTeam: string,
-  awayTeam: string
-): 'home' | 'away' | null => {
-  const q = question.toLowerCase().trim();
-  const home = homeTeam.toLowerCase();
-  const away = awayTeam.toLowerCase();
-
-  if (!home || !away) return null;
-
-  const hasHome = q.includes(home);
-  const hasAway = q.includes(away);
-
-  // Bare outcome label ("Yankees", "Red Sox")
-  if (hasHome && !hasAway) return 'home';
-  if (hasAway && !hasHome) return 'away';
-
-  if (!hasHome && !hasAway) return null;
-
-  // Full sentence — look for the team that precedes a win keyword.
-  const WIN_KEYWORDS = ['to win', 'beat', 'wins', 'will win', 'defeat'];
-  for (const kw of WIN_KEYWORDS) {
-    const kwIdx = q.indexOf(kw);
-    if (kwIdx < 0) continue;
-    const homeIdx = q.lastIndexOf(home, kwIdx - 1);
-    const awayIdx = q.lastIndexOf(away, kwIdx - 1);
-    if (homeIdx >= 0 && (awayIdx < 0 || homeIdx > awayIdx)) return 'home';
-    if (awayIdx >= 0 && (homeIdx < 0 || awayIdx > homeIdx)) return 'away';
-  }
-
-  return q.indexOf(home) < q.indexOf(away) ? 'home' : 'away';
-};
-
-const findLegPrices = (
-  markets: PolymarketMarket[],
-  side: 'home' | 'away',
-  homeTeam: string,
-  awayTeam: string
-): { yesPrice: number; noPrice: number } => {
-  const match = markets.find(
-    (m) => classifyMarket(m.question, homeTeam, awayTeam) === side
-  );
-  return match ? extractPrices(match) : { yesPrice: 0.5, noPrice: 0.5 };
-};
-
-// ─── event filtering ─────────────────────────────────────────────────────────
-
-const isMlbEvent = (event: PolymarketEvent): boolean => {
-  const series = (event.seriesSlug ?? '').toLowerCase();
-  const slug = (event.slug ?? '').toLowerCase();
-  return (
-    series.includes('mlb') ||
-    series.includes('baseball') ||
-    slug.includes('mlb') ||
-    slug.startsWith('mlb-')
-  );
-};
 
 // ─── date utilities ──────────────────────────────────────────────────────────
 
-const parseDateParam = (value: string | null): Date | null => {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
-const startOfDayUtc = (d: Date) =>
-  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-
-const endOfDayUtc = (d: Date) =>
+const startOfDayUtc = (value: Date) =>
   new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999)
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())
+  );
+
+const endOfDayUtc = (value: Date) =>
+  new Date(
+    Date.UTC(
+      value.getUTCFullYear(),
+      value.getUTCMonth(),
+      value.getUTCDate(),
+      23,
+      59,
+      59,
+      999
+    )
   );
 
 const getWindow = () => {
@@ -174,57 +57,13 @@ const getWindow = () => {
   return { from, to: endOfDayUtc(last) };
 };
 
-const inWindow = (isoDate: string, from: Date, to: Date): boolean => {
-  const v = new Date(isoDate);
-  return !Number.isNaN(v.getTime()) && v >= from && v <= to;
+const parseDateParam = (value: string | null): Date | null => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-// ─── market builder ───────────────────────────────────────────────────────────
-
-const toMlbMarketItem = (event: PolymarketEvent): MlbMarketItem | null => {
-  const teams = event.teams ?? [];
-  if (teams.length < 2) return null;
-
-  const home =
-    teams.find((t) => t.ordering === 'home') ?? teams[0];
-  const away =
-    teams.find((t) => t.ordering === 'away') ??
-    teams.find((t) => t.name !== home.name) ??
-    teams[1];
-
-  if (!home || !away) return null;
-
-  const eventId = String(event.id);
-  const markets = event.markets ?? [];
-
-  return {
-    id: eventId,
-    sourceProvider: 'POLYMARKET',
-    category: 'mlb-games',
-    matchup: `${home.name} vs ${away.name}`,
-    kickoff: event.endDate,
-    homeTeam: home.name,
-    awayTeam: away.name,
-    homeBranding: { logo: home.logo ?? '', color: home.color ?? null },
-    awayBranding: { logo: away.logo ?? '', color: away.color ?? null },
-    legs: [
-      {
-        id: `${eventId}:home`,
-        side: 'home',
-        label: home.name,
-        ...findLegPrices(markets, 'home', home.name, away.name),
-      },
-      {
-        id: `${eventId}:away`,
-        side: 'away',
-        label: away.name,
-        ...findLegPrices(markets, 'away', home.name, away.name),
-      },
-    ],
-  };
-};
-
-// ─── route ────────────────────────────────────────────────────────────────────
+// ─── route ───────────────────────────────────────────────────────────────────
 
 export const Route = createFileRoute('/api/mlb-markets')({
   server: {
@@ -234,40 +73,116 @@ export const Route = createFileRoute('/api/mlb-markets')({
         const queryFrom = parseDateParam(url.searchParams.get('dateFrom'));
         const queryTo = parseDateParam(url.searchParams.get('dateTo'));
 
-        // Fetch from both MLB-specific and baseball tags in parallel.
-        const [mlbRes, baseballRes] = await Promise.all([
-          fetch(
-            'https://gamma-api.polymarket.com/events?limit=200&active=true&closed=false&tag_slug=mlb'
-          ),
-          fetch(
-            'https://gamma-api.polymarket.com/events?limit=200&active=true&closed=false&tag_slug=baseball'
-          ),
-        ]);
-
-        const mlbEvents: PolymarketEvent[] = mlbRes.ok
-          ? ((await mlbRes.json()) as PolymarketEvent[])
-          : [];
-
-        const baseballEvents: PolymarketEvent[] = baseballRes.ok
-          ? ((await baseballRes.json()) as PolymarketEvent[])
-          : [];
-
-        // Merge, deduplicating by event ID.
-        const mlbIds = new Set(mlbEvents.map((e) => String(e.id)));
-        const filteredBaseball = baseballEvents.filter(
-          (e) => !mlbIds.has(String(e.id)) && isMlbEvent(e)
-        );
-
-        const allEvents = [...mlbEvents, ...filteredBaseball];
-
         const defaultWindow = getWindow();
         const from = queryFrom ?? defaultWindow.from;
         const to = queryTo ?? defaultWindow.to;
 
-        const markets = allEvents
-          .filter((e) => inWindow(e.endDate, from, to))
-          .map(toMlbMarketItem)
-          .filter((m): m is MlbMarketItem => m !== null)
+        // Each MLB event persists a single moneyline sub-market whose two
+        // outcomes are the team names (home/away win probabilities).
+        const marketRows = await db.query.externalMarket.findMany({
+          where: (t, { and, eq, gte, lte }) =>
+            and(
+              eq(t.sourceProvider, 'POLYMARKET'),
+              eq(t.category, 'mlb-games'),
+              gte(t.closeTime, from),
+              lte(t.closeTime, to)
+            ),
+          columns: {
+            id: true,
+            sourceEventId: true,
+            homeTeam: true,
+            awayTeam: true,
+            homeLogo: true,
+            homeColor: true,
+            awayLogo: true,
+            awayColor: true,
+            closeTime: true,
+          },
+        });
+
+        if (marketRows.length === 0) {
+          return Response.json({ markets: [] as MlbMarketItem[] });
+        }
+
+        const marketIds = marketRows.map((m) => m.id);
+
+        const [outcomeRows, snapshotRows] = await Promise.all([
+          db.query.externalOutcome.findMany({
+            where: (t, { inArray }) => inArray(t.marketId, marketIds),
+            columns: { id: true, marketId: true, label: true },
+          }),
+          db.query.externalPriceSnapshot.findMany({
+            where: (t, { inArray }) => inArray(t.marketId, marketIds),
+            orderBy: (t, { desc }) => desc(t.fetchedAt),
+            columns: { outcomeId: true, price: true },
+          }),
+        ]);
+
+        // Newest-first; keep the first (latest) price seen per outcome.
+        const latestPriceByOutcome = new Map<string, number>();
+        for (const snap of snapshotRows) {
+          if (!latestPriceByOutcome.has(snap.outcomeId)) {
+            latestPriceByOutcome.set(snap.outcomeId, Number(snap.price));
+          }
+        }
+
+        const outcomesByMarket = new Map<string, typeof outcomeRows>();
+        for (const outcome of outcomeRows) {
+          const list = outcomesByMarket.get(outcome.marketId) ?? [];
+          list.push(outcome);
+          outcomesByMarket.set(outcome.marketId, list);
+        }
+
+        // For a moneyline market the outcome labels are the team names, so a
+        // team's price is its own outcome's latest snapshot.
+        const teamPrice = (marketDbId: string, team: string): number => {
+          const outcomes = outcomesByMarket.get(marketDbId) ?? [];
+          const match = outcomes.find(
+            (o) => o.label.toLowerCase() === team.toLowerCase()
+          );
+          const price = match ? latestPriceByOutcome.get(match.id) : undefined;
+          return Number.isFinite(price) ? (price as number) : 0.5;
+        };
+
+        const markets: MlbMarketItem[] = marketRows
+          .filter((row) => row.sourceEventId && row.homeTeam && row.awayTeam)
+          .map((row) => {
+            const eventId = row.sourceEventId as string;
+            const homeTeam = row.homeTeam as string;
+            const awayTeam = row.awayTeam as string;
+
+            const homeYes = roundToCents(teamPrice(row.id, homeTeam));
+            const awayYes = roundToCents(teamPrice(row.id, awayTeam));
+
+            return {
+              id: eventId,
+              sourceProvider: 'POLYMARKET' as const,
+              category: 'mlb-games' as const,
+              matchup: `${homeTeam} vs ${awayTeam}`,
+              kickoff: row.closeTime ? row.closeTime.toISOString() : '',
+              homeTeam,
+              awayTeam,
+              homeBranding: { logo: row.homeLogo ?? '', color: row.homeColor ?? null },
+              awayBranding: { logo: row.awayLogo ?? '', color: row.awayColor ?? null },
+              legs: [
+                {
+                  id: `${eventId}:home`,
+                  side: 'home' as const,
+                  label: homeTeam,
+                  yesPrice: homeYes,
+                  noPrice: roundToCents(Math.max(0, Math.min(1, 1 - homeYes))),
+                },
+                {
+                  id: `${eventId}:away`,
+                  side: 'away' as const,
+                  label: awayTeam,
+                  yesPrice: awayYes,
+                  noPrice: roundToCents(Math.max(0, Math.min(1, 1 - awayYes))),
+                },
+              ],
+            };
+          })
+          .sort((a, b) => a.kickoff.localeCompare(b.kickoff))
           .slice(0, 24);
 
         return Response.json({ markets });

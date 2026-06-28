@@ -6,10 +6,12 @@ import {
   providerDeadLetter,
   providerSyncRun,
 } from '@starter/backend/schema';
-import { and, eq, lt } from '@starter/backend/orm';
+import { and, eq, inArray, lt } from '@starter/backend/orm';
 import { createHash } from 'node:crypto';
 
 type PolymarketToken = { outcome: string; price: number };
+
+type MarketCategory = 'fifa-games' | 'mlb-games';
 
 type PolymarketMarket = {
   id: string | number;
@@ -17,6 +19,9 @@ type PolymarketMarket = {
   outcomes?: string | string[];
   outcomePrices?: string | string[];
   tokens?: PolymarketToken[];
+  // Polymarket tags game sub-markets (e.g. "moneyline", "spreads", "totals").
+  // For MLB we keep only the moneyline market.
+  sportsMarketType?: string;
   updatedAt?: string;
   endDate?: string;
   active?: boolean;
@@ -44,6 +49,7 @@ type PolymarketEvent = {
 };
 
 type EnrichedMarket = PolymarketMarket & {
+  __category: MarketCategory;
   __eventId: string;
   __eventTitle: string;
   __eventSlug: string;
@@ -122,18 +128,35 @@ const extractTokenPrices = (market: PolymarketMarket): PolymarketToken[] => {
 const isMatchResultMarket = (market: PolymarketMarket): boolean =>
   WIN_TITLE_REGEX.test(market.question) || DRAW_TITLE_REGEX.test(market.question);
 
+// MLB game events bundle ~26 markets (spreads, totals, props). The head-to-head
+// winner is the single "moneyline" market, whose two outcomes are the team
+// names. That's the only one we persist for MLB cards.
+const isMoneylineMarket = (market: PolymarketMarket): boolean =>
+  market.sportsMarketType === 'moneyline';
+
+// Per-category market filter: FIFA win/draw binaries vs MLB moneyline.
+const passesCategoryFilter = (market: EnrichedMarket): boolean =>
+  market.__category === 'mlb-games'
+    ? isMoneylineMarket(market)
+    : isMatchResultMarket(market);
+
 const startOfDayUtc = (d: Date) =>
   new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
-const isCloseTimeTodayOrTomorrow = (isoDate: string | undefined): boolean => {
+// Window of upcoming days (UTC) the sync persists. Kept in sync with the read
+// path's getWindow() in routes/api/markets.ts so the dashboard never asks for
+// days the sync didn't populate.
+const SYNC_WINDOW_DAYS = 4;
+
+const isCloseTimeWithinWindow = (isoDate: string | undefined): boolean => {
   if (!isoDate) return false;
   const d = new Date(isoDate);
   if (Number.isNaN(d.getTime())) return false;
   const now = new Date();
   const today = startOfDayUtc(now);
-  const dayAfterTomorrow = new Date(today);
-  dayAfterTomorrow.setUTCDate(dayAfterTomorrow.getUTCDate() + 2);
-  return d >= today && d < dayAfterTomorrow;
+  const windowEnd = new Date(today);
+  windowEnd.setUTCDate(windowEnd.getUTCDate() + SYNC_WINDOW_DAYS);
+  return d >= today && d < windowEnd;
 };
 
 // Scrape polymarket.com/sports/world-cup/games for game slugs, then fetch
@@ -199,6 +222,50 @@ export const fetchWorldCupGameEvents = async (limit = 1000): Promise<PolymarketE
   }
 
   return allEvents;
+};
+
+const isMlbEvent = (event: PolymarketEvent): boolean => {
+  const series = (event.seriesSlug ?? '').toLowerCase();
+  const slug = (event.slug ?? '').toLowerCase();
+  return (
+    series.includes('mlb') ||
+    series.includes('baseball') ||
+    slug.includes('mlb') ||
+    slug.startsWith('mlb-')
+  );
+};
+
+// Fetch MLB game events from the mlb + baseball tags, deduped. Only events with
+// a two-team matchup are returned (excludes futures like "World Series winner").
+export const fetchMlbGameEvents = async (limit = 1000): Promise<PolymarketEvent[]> => {
+  const pageLimit = Math.min(Math.max(limit, 1), 200);
+
+  const fetchTag = async (tag: string): Promise<PolymarketEvent[]> => {
+    try {
+      const res = await fetch(
+        `https://gamma-api.polymarket.com/events?limit=${pageLimit}&active=true&closed=false&tag_slug=${tag}`
+      );
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? (data as PolymarketEvent[]) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const [mlbEvents, baseballEvents] = await Promise.all([
+    fetchTag('mlb'),
+    fetchTag('baseball'),
+  ]);
+
+  const mlbIds = new Set(mlbEvents.map((e) => String(e.id)));
+  const filteredBaseball = baseballEvents.filter(
+    (e) => !mlbIds.has(String(e.id)) && isMlbEvent(e)
+  );
+
+  return [...mlbEvents, ...filteredBaseball]
+    .filter((e) => (e.teams?.length ?? 0) >= 2)
+    .slice(0, limit);
 };
 
 export type SyncPolyMarketOptions = {
@@ -290,16 +357,16 @@ const recordDeadLetter = async (args: {
   }
 };
 
-// Delete POLYMARKET FIFA markets whose close time is before today (UTC).
-// Outcomes and price snapshots cascade via FK constraints.
-const pruneOldPolymarketFifaMarkets = async (): Promise<number> => {
+// Delete POLYMARKET game markets (FIFA + MLB) whose close time is before today
+// (UTC). Outcomes and price snapshots cascade via FK constraints.
+const pruneOldPolymarketMarkets = async (): Promise<number> => {
   const cutoff = startOfDayUtc(new Date());
   const deleted = await db
     .delete(externalMarket)
     .where(
       and(
         eq(externalMarket.sourceProvider, 'POLYMARKET'),
-        eq(externalMarket.category, 'fifa-games'),
+        inArray(externalMarket.category, ['fifa-games', 'mlb-games']),
         lt(externalMarket.closeTime, cutoff)
       )
     )
@@ -343,7 +410,7 @@ const runCatalogSync = async (args: {
                 sourceMarketId,
                 title: market.question,
                 description: market.__eventTitle,
-                category: 'fifa-games',
+                category: market.__category,
                 status: marketStatus,
                 sourceEventId: market.__eventId,
                 eventSlug: market.__eventSlug,
@@ -531,7 +598,7 @@ const runStatusTransitionSync = async (args: {
                 sourceProvider: 'POLYMARKET',
                 sourceMarketId,
                 title: market.question,
-                category: 'fifa-games',
+                category: market.__category,
                 status: marketStatus,
               })
               .onConflictDoUpdate({
@@ -640,23 +707,31 @@ export const syncPolyMarketMarkets = async (
       `Syncing PolyMarket jobs (runId: ${syncRunId}, limit: ${limit}, batchSize: ${batchSize})...`
     );
 
-    const prunedMarkets = await pruneOldPolymarketFifaMarkets();
+    const prunedMarkets = await pruneOldPolymarketMarkets();
     if (prunedMarkets > 0) {
-      console.log(`Pruned ${prunedMarkets} old PolyMarket FIFA market records before sync.`);
+      console.log(`Pruned ${prunedMarkets} old PolyMarket market records before sync.`);
     }
 
-    const events = await withRetry(() => fetchWorldCupGameEvents(limit), {
-      attempts: retryAttempts,
-    });
+    // Fetch both sports in parallel and tag each event with its category.
+    const [fifaEvents, mlbEvents] = await Promise.all([
+      withRetry(() => fetchWorldCupGameEvents(limit), { attempts: retryAttempts }),
+      withRetry(() => fetchMlbGameEvents(limit), { attempts: retryAttempts }),
+    ]);
+
+    const taggedEvents: { event: PolymarketEvent; category: MarketCategory }[] = [
+      ...fifaEvents.map((event) => ({ event, category: 'fifa-games' as const })),
+      ...mlbEvents.map((event) => ({ event, category: 'mlb-games' as const })),
+    ];
 
     // Flatten markets from qualifying events, injecting event metadata so each
     // sub-market carries everything the read path needs to rebuild a card.
-    const markets: EnrichedMarket[] = events
-      .filter((event) => isCloseTimeTodayOrTomorrow(event.endDate))
-      .flatMap((event) => {
+    const markets: EnrichedMarket[] = taggedEvents
+      .filter(({ event }) => isCloseTimeWithinWindow(event.endDate))
+      .flatMap(({ event, category }) => {
         const teams = resolveEventTeams(event);
         return (event.markets ?? []).map((market) => ({
           ...market,
+          __category: category,
           __eventId: String(event.id),
           __eventTitle: event.title,
           __eventSlug: event.slug ?? '',
@@ -669,7 +744,7 @@ export const syncPolyMarketMarkets = async (
           __awayColor: teams.awayColor,
         }));
       })
-      .filter((market) => isMatchResultMarket(market))
+      .filter((market) => passesCategoryFilter(market))
       .slice(0, limit);
 
     const catalog = await runCatalogSync({
@@ -767,7 +842,7 @@ export const syncPolyMarketMarkets = async (
     return {
       runId: syncRunId,
       sourceProvider: 'POLYMARKET',
-      fetchedEvents: events.length,
+      fetchedEvents: taggedEvents.length,
       totalCandidates: markets.length,
       jobs: { catalog: catalog.result, odds, status },
       observability: {

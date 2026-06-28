@@ -66,9 +66,10 @@ const classifyMarket = (
 export const Route = createFileRoute('/api/markets/$marketId')({
   server: {
     handlers: {
-      // marketId is the persisted sourceEventId; the three sub-markets of the
-      // fixture share it. We pick the sub-market for `side`, then read its
-      // latest Yes-outcome snapshot from the DB.
+      // marketId is the persisted sourceEventId. Two shapes share this route:
+      //   FIFA  — three binary sub-markets (Yes/No); price = the side's Yes.
+      //   MLB   — one moneyline sub-market whose outcomes are the team names;
+      //           price = the side's team outcome.
       GET: async ({ request, params }) => {
         const marketId = params.marketId;
         const url = new URL(request.url);
@@ -81,7 +82,6 @@ export const Route = createFileRoute('/api/markets/$marketId')({
           where: (t, { and, eq }) =>
             and(
               eq(t.sourceProvider, 'POLYMARKET'),
-              eq(t.category, 'fifa-games'),
               eq(t.sourceEventId, marketId)
             ),
           columns: {
@@ -102,32 +102,58 @@ export const Route = createFileRoute('/api/markets/$marketId')({
           url.searchParams.get('homeTeam') ?? rows[0].homeTeam ?? '';
         const awayTeam =
           url.searchParams.get('awayTeam') ?? rows[0].awayTeam ?? '';
+        const targetTeam = side === 'home' ? homeTeam : side === 'away' ? awayTeam : '';
 
-        const selected =
-          rows.find((r) => classifyMarket(r.title, homeTeam, awayTeam) === side) ??
-          rows[0];
-
-        // Resolve the latest Yes price for the selected sub-market.
+        // All outcomes for the event's sub-market(s), with latest prices.
         const outcomes = await db.query.externalOutcome.findMany({
-          where: (t, { eq }) => eq(t.marketId, selected.id),
-          columns: { id: true, label: true },
+          where: (t, { inArray }) => inArray(t.marketId, rows.map((r) => r.id)),
+          columns: { id: true, marketId: true, label: true },
         });
 
-        const yesOutcome =
-          outcomes.find((o) => o.label.toLowerCase() === 'yes') ?? outcomes[0];
+        const latestForOutcome = async (outcomeId: string) =>
+          db.query.externalPriceSnapshot.findFirst({
+            where: (t, { eq }) => eq(t.outcomeId, outcomeId),
+            orderBy: (t, { desc }) => desc(t.fetchedAt),
+            columns: { price: true, fetchedAt: true },
+          });
 
-        if (!yesOutcome) {
+        // MLB moneyline: an outcome labeled with the side's team name.
+        const moneylineOutcome =
+          targetTeam.length > 0
+            ? outcomes.find(
+                (o) => o.label.toLowerCase() === targetTeam.toLowerCase()
+              )
+            : undefined;
+
+        let priceOutcomeId: string | undefined;
+        let selected = rows[0];
+
+        if (moneylineOutcome) {
+          priceOutcomeId = moneylineOutcome.id;
+          selected =
+            rows.find((r) => r.id === moneylineOutcome.marketId) ?? rows[0];
+        } else {
+          // FIFA: pick the sub-market for this side, then its Yes outcome.
+          selected =
+            rows.find(
+              (r) => classifyMarket(r.title, homeTeam, awayTeam) === side
+            ) ?? rows[0];
+          const marketOutcomes = outcomes.filter(
+            (o) => o.marketId === selected.id
+          );
+          priceOutcomeId = (
+            marketOutcomes.find((o) => o.label.toLowerCase() === 'yes') ??
+            marketOutcomes[0]
+          )?.id;
+        }
+
+        if (!priceOutcomeId) {
           return Response.json(priceUnavailable(selected.sourceMarketId), {
             status: 200,
           });
         }
 
-        const latest = await db.query.externalPriceSnapshot.findFirst({
-          where: (t, { eq }) => eq(t.outcomeId, yesOutcome.id),
-          orderBy: (t, { desc }) => desc(t.fetchedAt),
-          columns: { price: true, fetchedAt: true },
-        });
-
+        const latest = await latestForOutcome(priceOutcomeId);
         const yesPriceRaw = latest ? Number(latest.price) : 0.5;
         const yesPrice = Number.isFinite(yesPriceRaw) ? yesPriceRaw : 0.5;
         const noPrice = Math.max(0, Math.min(1, 1 - yesPrice));
