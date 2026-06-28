@@ -322,6 +322,11 @@ const isParlayInHistory = (team: ParlayTeam): boolean => {
     return false;
   }
 
+  // Once claimed, the parlay is done — tuck it into history.
+  if (team.hasClaimed) {
+    return true;
+  }
+
   if (team.committedLegs.length === 0) {
     return false;
   }
@@ -1211,11 +1216,16 @@ const PortfolioPage = () => {
     setSharesToCommit(0);
   };
 
-  // Active/pending parlays sort chronologically by start time (soonest first);
-  // history sorts most-recent first.
+  // Claimable parlays come first, then active/pending chronologically by start
+  // time (soonest first); history sorts most-recent first.
   const activeParlayTeams = parlayTeams
     .filter((team) => !isParlayInHistory(team))
-    .sort((a, b) => parlayStartMs(a) - parlayStartMs(b));
+    .sort((a, b) => {
+      if (a.canClaim !== b.canClaim) {
+        return a.canClaim ? -1 : 1;
+      }
+      return parlayStartMs(a) - parlayStartMs(b);
+    });
   const historyParlayTeams = parlayTeams
     .filter((team) => isParlayInHistory(team))
     .sort((a, b) => parlayStartMs(b) - parlayStartMs(a));
@@ -1227,7 +1237,15 @@ const PortfolioPage = () => {
       onClick={() => openParlayTeamModal(team)}
       className="rounded-2xl border border-gray-200 bg-white p-4 text-left transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
     >
-      {parlayFirstLegStarted(team) ? (
+      {team.canClaim ? (
+        <span className="mb-1 inline-flex rounded-full border border-emerald-500 bg-emerald-500 px-2 py-0.5 font-semibold text-[10px] text-white uppercase tracking-wide">
+          Claimable
+        </span>
+      ) : team.hasClaimed ? (
+        <span className="mb-1 inline-flex rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 font-semibold text-[10px] text-gray-500 uppercase tracking-wide">
+          Claimed
+        </span>
+      ) : parlayFirstLegStarted(team) ? (
         <span className="mb-1 inline-flex rounded-full border border-green-200 bg-green-50 px-2 py-0.5 font-semibold text-[10px] text-green-700 uppercase tracking-wide">
           Active
         </span>
