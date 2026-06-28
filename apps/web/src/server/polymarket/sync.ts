@@ -88,7 +88,7 @@ const isCloseTimeTodayOrTomorrow = (isoDate: string | undefined): boolean => {
 
 // Scrape polymarket.com/sports/world-cup/games for game slugs, then fetch
 // each slug from the Gamma events API. Falls back to tag pagination.
-export const fetchWorldCupGameEvents = async (limit = 50): Promise<PolymarketEvent[]> => {
+export const fetchWorldCupGameEvents = async (limit = 1000): Promise<PolymarketEvent[]> => {
   let slugs: string[] = [];
 
   try {
@@ -97,8 +97,8 @@ export const fetchWorldCupGameEvents = async (limit = 50): Promise<PolymarketEve
     });
     if (scrapeRes.ok) {
       const html = await scrapeRes.text();
-      const matches = html.matchAll(/href="\/event\/([a-z0-9-]+)"/g);
-      slugs = Array.from(new Set([...matches].map((m) => m[1]))).slice(0, limit);
+      const matches = html.matchAll(/\/sports\/world-cup\/([a-z0-9-]+)/gi);
+      slugs = Array.from(new Set([...matches].map((m) => m[1])));
     }
   } catch {
     // ignore scrape errors — fall through to pagination
@@ -123,16 +123,32 @@ export const fetchWorldCupGameEvents = async (limit = 50): Promise<PolymarketEve
       .flatMap((r) => r.value);
 
     if (events.length > 0) {
-      return events;
+      return events.slice(0, limit);
     }
   }
 
-  // Fallback: paginate the world-cup tag
-  const res = await fetch(
-    `https://gamma-api.polymarket.com/events?limit=${limit}&active=true&closed=false&tag_slug=world-cup`
-  );
-  if (!res.ok) return [];
-  return (await res.json()) as PolymarketEvent[];
+  // Fallback: paginate the world-cup tag with offset.
+  const pageSize = 100;
+  const pages = Math.max(1, Math.ceil(limit / pageSize));
+  const allEvents: PolymarketEvent[] = [];
+
+  for (let page = 0; page < pages; page++) {
+    const offset = page * pageSize;
+    const res = await fetch(
+      `https://gamma-api.polymarket.com/events?limit=${pageSize}&offset=${offset}&tag_slug=world-cup`,
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    if (!res.ok) break;
+
+    const data = (await res.json()) as PolymarketEvent[];
+    const events = Array.isArray(data) ? data : [];
+    if (events.length === 0) break;
+
+    allEvents.push(...events);
+    if (events.length < pageSize) break;
+  }
+
+  return allEvents;
 };
 
 export const syncPolyMarketMarkets = async (
