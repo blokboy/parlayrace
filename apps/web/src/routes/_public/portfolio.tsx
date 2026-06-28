@@ -294,26 +294,32 @@ const LegOutcomeBadge = ({
   );
 };
 
-// A parlay drops into history once it's settled or its last leg kicked off
-// more than this long ago.
+// A parlay drops into history once its last leg kicked off more than this long
+// ago (claimable parlays are kept up top regardless).
 const PARLAY_HISTORY_CUTOFF_MS = 12 * 60 * 60 * 1000;
 
-const parlayFirstLegStarted = (team: ParlayTeam): boolean => {
+// The parlay's start time = its earliest leg kickoff (used for chronological
+// ordering). Parlays with no legs sort last.
+const parlayStartMs = (team: ParlayTeam): number => {
   if (team.committedLegs.length === 0) {
-    return false;
+    return Number.POSITIVE_INFINITY;
   }
 
-  const earliestKickoffMs = team.committedLegs.reduce((min, leg) => {
+  return team.committedLegs.reduce((min, leg) => {
     const ms = new Date(leg.kickoff).getTime();
     return Number.isFinite(ms) ? Math.min(min, ms) : min;
   }, Number.POSITIVE_INFINITY);
+};
 
-  return Number.isFinite(earliestKickoffMs) && earliestKickoffMs <= Date.now();
+const parlayFirstLegStarted = (team: ParlayTeam): boolean => {
+  const startMs = parlayStartMs(team);
+  return Number.isFinite(startMs) && startMs <= Date.now();
 };
 
 const isParlayInHistory = (team: ParlayTeam): boolean => {
-  if (team.status === 'WON' || team.status === 'LOST') {
-    return true;
+  // Keep claimable parlays up top so the CLAIM action stays visible.
+  if (team.canClaim) {
+    return false;
   }
 
   if (team.committedLegs.length === 0) {
@@ -1205,12 +1211,14 @@ const PortfolioPage = () => {
     setSharesToCommit(0);
   };
 
-  const activeParlayTeams = parlayTeams.filter(
-    (team) => !isParlayInHistory(team)
-  );
-  const historyParlayTeams = parlayTeams.filter((team) =>
-    isParlayInHistory(team)
-  );
+  // Active/pending parlays sort chronologically by start time (soonest first);
+  // history sorts most-recent first.
+  const activeParlayTeams = parlayTeams
+    .filter((team) => !isParlayInHistory(team))
+    .sort((a, b) => parlayStartMs(a) - parlayStartMs(b));
+  const historyParlayTeams = parlayTeams
+    .filter((team) => isParlayInHistory(team))
+    .sort((a, b) => parlayStartMs(b) - parlayStartMs(a));
 
   const renderParlayTeamCard = (team: ParlayTeam) => (
     <button
@@ -1241,7 +1249,7 @@ const PortfolioPage = () => {
         {team.members.slice(0, 3).map((member) => (
           <span
             key={`${team.id}-${member.id}`}
-            className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-gray-700 text-xs"
+            className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-1 font-semibold text-violet-700 text-xs"
           >
             {member.username}
           </span>
@@ -1963,7 +1971,7 @@ const PortfolioPage = () => {
                 {(selectedParlayTeam?.members ?? []).map((member) => (
                   <span
                     key={member.id}
-                    className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-gray-700 text-xs"
+                    className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-1 font-semibold text-violet-700 text-xs"
                   >
                     {member.username}
                   </span>
@@ -1980,11 +1988,16 @@ const PortfolioPage = () => {
                   {selectedParlayTeam.committedLegs.map((leg) => {
                     const metrics = teamLegMetricsById[leg.id];
                     const liveStatus = teamLegLiveStatusesById[leg.id];
-                    // The final leg has nothing to roll into, so it (and a
-                    // single-leg parlay) can't be rolled over.
-                    const hasLaterLeg = selectedParlayTeam.committedLegs.some(
-                      (other) => other.sequence > leg.sequence
-                    );
+                    // A leg can only roll over while a later leg is still
+                    // pending and hasn't kicked off yet (the rollover target).
+                    // The final leg / single-leg parlay therefore can't roll.
+                    const hasRolloverTarget =
+                      selectedParlayTeam.committedLegs.some(
+                        (other) =>
+                          other.sequence > leg.sequence &&
+                          other.result === 'PENDING' &&
+                          new Date(other.kickoff).getTime() > Date.now()
+                      );
 
                     return (
                       <div
@@ -2015,7 +2028,7 @@ const PortfolioPage = () => {
                             </p>
                             {leg.result === 'PENDING' &&
                             leg.addedByUsername === username &&
-                            hasLaterLeg ? (
+                            hasRolloverTarget ? (
                               rolloverLegId === leg.id ? (
                                 <div className="flex flex-col items-end gap-1.5">
                                   <div className="flex gap-1.5">
@@ -2122,143 +2135,155 @@ const PortfolioPage = () => {
                   No legs committed yet.
                 </p>
               )}
-
-              {selectedParlayTeam?.canClaim ? (
-                <button
-                  type="button"
-                  onClick={() => void handleClaimParlayTeam()}
-                  disabled={committingShare}
-                  className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Claim ${selectedParlayTeam.claimAmount.toFixed(2)}
-                </button>
-              ) : selectedParlayTeam?.hasClaimed ? (
-                <div className="mt-4 rounded-md border border-emerald-200 bg-white px-3 py-2 text-emerald-700 text-sm">
-                  Claimed ${selectedParlayTeam.claimAmount.toFixed(2)}.
-                </div>
-              ) : null}
             </div>
 
-            <div className="rounded-lg border border-gray-200 bg-white p-4">
-              <p className="font-semibold text-gray-900 text-sm">
-                Add Shares from Portfolio
-              </p>
-
-              <div className="mt-3 space-y-3">
-                <select
-                  value={selectedTeamPositionId}
-                  onChange={(event) => {
-                    const positionId = event.target.value;
-                    setSelectedTeamPositionId(positionId);
-
-                    const position = selectedTeamOpenPositions.find(
-                      (entry) => entry.id === positionId
-                    );
-                    setSharesToCommit(
-                      position ? roundToCents(position.quantity) : 0
-                    );
-                  }}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                >
-                  <option value="">Select an open position</option>
-                  {selectedTeamOpenPositions.map((position) => (
-                    <option
-                      key={position.id}
-                      value={position.id}
+            {selectedParlayTeam?.canClaim || selectedParlayTeam?.hasClaimed ? (
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <p className="font-semibold text-gray-900 text-sm">
+                  Claim Winnings
+                </p>
+                <div className="mt-3">
+                  {selectedParlayTeam?.canClaim ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleClaimParlayTeam()}
+                      disabled={committingShare}
+                      className="inline-flex w-full items-center justify-center rounded-full bg-emerald-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {position.matchup} · {position.side.toUpperCase()} ·{' '}
-                      {position.quantity.toFixed(2)} shares
-                    </option>
-                  ))}
-                </select>
-
-                {selectedTeamOpenPositions.length === 0 ? (
-                  <p className="text-gray-500 text-xs">
-                    {selectedParlayFirstLegStarted
-                      ? 'No eligible positions available. Once the first leg starts, no more legs can be added.'
-                      : 'No eligible positions available. Legs with conflicting start times cannot be added to this Parlay Team.'}
-                  </p>
-                ) : null}
-
-                {selectedTeamPosition ? (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-4 gap-2">
-                      {[25, 50, 75, 100].map((value) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => {
-                            setSharesToCommit(
-                              roundToCents(
-                                (selectedTeamPosition.quantity * value) / 100
-                              )
-                            );
-                          }}
-                          className="rounded-md border border-violet-200 bg-white px-3 py-1 font-semibold text-sm text-violet-900 transition hover:border-violet-300 hover:bg-violet-50"
-                        >
-                          {value}%
-                        </button>
-                      ))}
+                      {committingShare
+                        ? 'Claiming...'
+                        : `CLAIM $${selectedParlayTeam.claimAmount.toFixed(2)}`}
+                    </button>
+                  ) : (
+                    <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-emerald-700 text-sm">
+                      Claimed ${selectedParlayTeam?.claimAmount.toFixed(2)}.
+                      This can only be done once.
                     </div>
-
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-violet-900">Shares to Add</p>
-                      <p className="text-sm text-violet-900">
-                        {sharesToCommit.toFixed(2)} /{' '}
-                        {selectedTeamPosition.quantity.toFixed(2)}
-                      </p>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max={Math.max(0, selectedTeamPosition.quantity)}
-                      step="0.01"
-                      value={sharesToCommit}
-                      onChange={(event) =>
-                        setSharesToCommit(Number(event.target.value))
-                      }
-                      className="w-full"
-                    />
-                  </div>
-                ) : null}
-
-                {selectedTeamPosition ? (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800 leading-snug">
-                    Heads up: committed shares leave this position and{' '}
-                    <span className="font-semibold">cannot be withdrawn</span>{' '}
-                    until the Parlay concludes with a victory. Shares can only
-                    be sent once, and only in one direction.
-                  </div>
-                ) : null}
-
-                {teamModalFeedback ? (
-                  <div className="rounded-md border border-indigo-200 bg-white px-3 py-2 text-indigo-700 text-sm">
-                    {teamModalFeedback}
-                  </div>
-                ) : null}
-
-                <button
-                  type="button"
-                  onClick={() => void handleCommitShareToTeam()}
-                  disabled={
-                    selectedParlayFirstLegStarted ||
-                    !selectedTeamPosition ||
-                    sharesToCommit <= 0 ||
-                    committingShare
-                  }
-                  style={{
-                    backgroundColor: addSharesPalette.background,
-                    color: addSharesPalette.color,
-                    borderColor: addSharesPalette.border,
-                  }}
-                  className="inline-flex w-full items-center justify-center rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {committingShare
-                    ? 'Adding Shares...'
-                    : 'Add Shares to Parlay Team'}
-                </button>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <p className="font-semibold text-gray-900 text-sm">
+                  Add Shares from Portfolio
+                </p>
+
+                <div className="mt-3 space-y-3">
+                  <select
+                    value={selectedTeamPositionId}
+                    onChange={(event) => {
+                      const positionId = event.target.value;
+                      setSelectedTeamPositionId(positionId);
+
+                      const position = selectedTeamOpenPositions.find(
+                        (entry) => entry.id === positionId
+                      );
+                      setSharesToCommit(
+                        position ? roundToCents(position.quantity) : 0
+                      );
+                    }}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">Select an open position</option>
+                    {selectedTeamOpenPositions.map((position) => (
+                      <option
+                        key={position.id}
+                        value={position.id}
+                      >
+                        {position.matchup} · {position.side.toUpperCase()} ·{' '}
+                        {position.quantity.toFixed(2)} shares
+                      </option>
+                    ))}
+                  </select>
+
+                  {selectedTeamOpenPositions.length === 0 ? (
+                    <p className="text-gray-500 text-xs">
+                      {selectedParlayFirstLegStarted
+                        ? 'No eligible positions available. Once the first leg starts, no more legs can be added.'
+                        : 'No eligible positions available. Legs with conflicting start times cannot be added to this Parlay Team.'}
+                    </p>
+                  ) : null}
+
+                  {selectedTeamPosition ? (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-4 gap-2">
+                        {[25, 50, 75, 100].map((value) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => {
+                              setSharesToCommit(
+                                roundToCents(
+                                  (selectedTeamPosition.quantity * value) / 100
+                                )
+                              );
+                            }}
+                            className="rounded-md border border-violet-200 bg-white px-3 py-1 font-semibold text-sm text-violet-900 transition hover:border-violet-300 hover:bg-violet-50"
+                          >
+                            {value}%
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-violet-900">Shares to Add</p>
+                        <p className="text-sm text-violet-900">
+                          {sharesToCommit.toFixed(2)} /{' '}
+                          {selectedTeamPosition.quantity.toFixed(2)}
+                        </p>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max={Math.max(0, selectedTeamPosition.quantity)}
+                        step="0.01"
+                        value={sharesToCommit}
+                        onChange={(event) =>
+                          setSharesToCommit(Number(event.target.value))
+                        }
+                        className="w-full"
+                      />
+                    </div>
+                  ) : null}
+
+                  {selectedTeamPosition ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800 leading-snug">
+                      Heads up: committed shares leave this position and{' '}
+                      <span className="font-semibold">cannot be withdrawn</span>{' '}
+                      until the Parlay concludes with a victory. Shares can only
+                      be sent once, and only in one direction.
+                    </div>
+                  ) : null}
+
+                  {teamModalFeedback ? (
+                    <div className="rounded-md border border-indigo-200 bg-white px-3 py-2 text-indigo-700 text-sm">
+                      {teamModalFeedback}
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => void handleCommitShareToTeam()}
+                    disabled={
+                      selectedParlayFirstLegStarted ||
+                      !selectedTeamPosition ||
+                      sharesToCommit <= 0 ||
+                      committingShare
+                    }
+                    style={{
+                      backgroundColor: addSharesPalette.background,
+                      color: addSharesPalette.color,
+                      borderColor: addSharesPalette.border,
+                    }}
+                    className="inline-flex w-full items-center justify-center rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {committingShare
+                      ? 'Adding Shares...'
+                      : 'Add Shares to Parlay Team'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
