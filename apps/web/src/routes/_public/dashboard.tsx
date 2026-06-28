@@ -70,10 +70,11 @@ type SelectedTrade = {
 
 type LeagueCategory = 'fifa-games' | 'mlb-games';
 
-const LEAGUE_META: ReadonlyArray<{ category: LeagueCategory; label: string }> = [
-  { category: 'fifa-games', label: 'FIFA' },
-  { category: 'mlb-games', label: 'MLB' },
-];
+const LEAGUE_META: ReadonlyArray<{ category: LeagueCategory; label: string }> =
+  [
+    { category: 'fifa-games', label: 'FIFA' },
+    { category: 'mlb-games', label: 'MLB' },
+  ];
 
 type MarketDetail = {
   marketId: string;
@@ -327,22 +328,22 @@ const fetchMarkets = async (): Promise<MarketItem[]> => {
   const qs = `dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`;
 
   const [fifaRes, mlbRes] = await Promise.all([
-    fetch(
-      `/api/markets?sourceProvider=POLYMARKET&category=fifa-games&${qs}`,
-      { method: 'GET', headers: { Accept: 'application/json' } }
-    ),
-    fetch(
-      `/api/mlb-markets?${qs}`,
-      { method: 'GET', headers: { Accept: 'application/json' } }
-    ),
+    fetch(`/api/markets?sourceProvider=POLYMARKET&category=fifa-games&${qs}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    }),
+    fetch(`/api/mlb-markets?${qs}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    }),
   ]);
 
   const fifaMarkets = fifaRes.ok
-    ? ((await fifaRes.json()) as { markets?: MarketItem[] }).markets ?? []
+    ? (((await fifaRes.json()) as { markets?: MarketItem[] }).markets ?? [])
     : [];
 
   const mlbMarkets = mlbRes.ok
-    ? ((await mlbRes.json()) as { markets?: MarketItem[] }).markets ?? []
+    ? (((await mlbRes.json()) as { markets?: MarketItem[] }).markets ?? [])
     : [];
 
   return [...fifaMarkets, ...mlbMarkets];
@@ -400,16 +401,19 @@ const FlagButton = ({
   team,
   draw = false,
   onClick,
+  disabled = false,
 }: {
   team: { name: string; logo: string; color: string | null };
   draw?: boolean;
   onClick?: () => void;
+  disabled?: boolean;
 }) => {
   if (draw) {
     return (
       <button
         type="button"
         onClick={onClick}
+        disabled={disabled}
         className="!bg-white hover:!bg-white w-full rounded-lg border border-violet-200 px-3 py-2 font-semibold text-sm text-violet-900 transition hover:border-violet-400 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         Draw
@@ -423,6 +427,7 @@ const FlagButton = ({
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className="w-full rounded-lg border px-3 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
       style={{
         backgroundColor: palette.background,
@@ -444,7 +449,10 @@ const FlagButton = ({
   );
 };
 
-type ResolvedPrices = Record<string, { home: number; draw: number; away: number }>;
+type ResolvedPrices = Record<
+  string,
+  { home: number; draw: number; away: number }
+>;
 
 const StatusBadge = ({
   card,
@@ -467,7 +475,7 @@ const StatusBadge = ({
   // side will have yesPrice ≈ 1.0, losing sides ≈ 0.0.
   const prices = resolvedPrices[card.id];
   const homeP = prices?.home ?? card.homeLeg.yesPrice;
-  const drawP = prices?.draw ?? (card.drawLeg?.yesPrice ?? 0);
+  const drawP = prices?.draw ?? card.drawLeg?.yesPrice ?? 0;
   const awayP = prices?.away ?? card.awayLeg.yesPrice;
   const maxP = Math.max(homeP, drawP, awayP);
 
@@ -507,9 +515,7 @@ const StatusBadge = ({
           />
         ) : null}
         <span>{winnerTeam.name}</span>
-        {scoreLabel ? (
-          <span className="opacity-75">· {scoreLabel}</span>
-        ) : null}
+        {scoreLabel ? <span className="opacity-75">· {scoreLabel}</span> : null}
       </span>
     );
   }
@@ -698,15 +704,23 @@ const DashboardPage = () => {
           category: card.category,
         };
         const [homeDetail, drawDetail, awayDetail] = await Promise.all([
-          fetchMarketDetail({ ...base, side: 'home', selectionLabel: card.home.name }),
+          fetchMarketDetail({
+            ...base,
+            side: 'home',
+            selectionLabel: card.home.name,
+          }),
           fetchMarketDetail({ ...base, side: 'draw', selectionLabel: 'Draw' }),
-          fetchMarketDetail({ ...base, side: 'away', selectionLabel: card.away.name }),
+          fetchMarketDetail({
+            ...base,
+            side: 'away',
+            selectionLabel: card.away.name,
+          }),
         ]);
         return [
           card.id,
           {
             home: homeDetail?.yesPrice ?? card.homeLeg.yesPrice,
-            draw: drawDetail?.yesPrice ?? (card.drawLeg?.yesPrice ?? 0),
+            draw: drawDetail?.yesPrice ?? card.drawLeg?.yesPrice ?? 0,
             away: awayDetail?.yesPrice ?? card.awayLeg.yesPrice,
           },
         ] as const;
@@ -855,7 +869,9 @@ const DashboardPage = () => {
         ? selectedTrade.awayTeam
         : null;
   const selectedPalette = getTeamButtonPalette({
-    color: selectedTeamName ? (teamBrands[selectedTeamName]?.color ?? null) : null,
+    color: selectedTeamName
+      ? (teamBrands[selectedTeamName]?.color ?? null)
+      : null,
   });
   const selectedPrice =
     pickSide === 'YES'
@@ -989,7 +1005,7 @@ const DashboardPage = () => {
               className={`!bg-white rounded-full border px-3 py-1 font-semibold text-xs uppercase tracking-wide transition ${
                 badge.active
                   ? 'border-violet-500 text-violet-900 ring-1 ring-violet-400'
-                  : 'border-violet-200 text-violet-500 hover:border-violet-300 hover:!bg-violet-50'
+                  : 'hover:!bg-violet-50 border-violet-200 text-violet-500 hover:border-violet-300'
               }`}
             >
               {badge.label}
@@ -1000,7 +1016,10 @@ const DashboardPage = () => {
         {loading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="landing-panel p-6">
+              <div
+                key={i}
+                className="landing-panel p-6"
+              >
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <Skeleton className="h-6 w-40 rounded-md bg-violet-100" />
                   <Skeleton className="h-5 w-16 rounded-full bg-violet-100" />
@@ -1045,17 +1064,20 @@ const DashboardPage = () => {
                       <div className="flex flex-col gap-2">
                         <FlagButton
                           team={card.home}
+                          disabled={Boolean(liveStatuses[card.id]?.isFinal)}
                           onClick={() => openTradeModal(card, 'home')}
                         />
                         {card.drawLeg ? (
                           <FlagButton
                             team={card.home}
                             draw={true}
+                            disabled={Boolean(liveStatuses[card.id]?.isFinal)}
                             onClick={() => openTradeModal(card, 'draw')}
                           />
                         ) : null}
                         <FlagButton
                           team={card.away}
+                          disabled={Boolean(liveStatuses[card.id]?.isFinal)}
                           onClick={() => openTradeModal(card, 'away')}
                         />
                       </div>
@@ -1160,7 +1182,7 @@ const DashboardPage = () => {
                       <button
                         type="button"
                         onClick={() => setPickSide('YES')}
-                        className={`rounded-full border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-400 bg-emerald-500 text-white' : '!bg-white border-emerald-300 text-emerald-700 hover:!bg-emerald-50'}`}
+                        className={`rounded-full border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-400 bg-emerald-500 text-white' : '!bg-white hover:!bg-emerald-50 border-emerald-300 text-emerald-700'}`}
                       >
                         YES{' '}
                         {marketDetail
@@ -1170,7 +1192,7 @@ const DashboardPage = () => {
                       <button
                         type="button"
                         onClick={() => setPickSide('NO')}
-                        className={`rounded-full border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-400 bg-rose-500 text-white' : '!bg-white border-rose-300 text-rose-700 hover:!bg-rose-50'}`}
+                        className={`rounded-full border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-400 bg-rose-500 text-white' : '!bg-white hover:!bg-rose-50 border-rose-300 text-rose-700'}`}
                       >
                         NO{' '}
                         {marketDetail

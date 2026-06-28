@@ -316,14 +316,26 @@ const parlayFirstLegStarted = (team: ParlayTeam): boolean => {
   return Number.isFinite(startMs) && startMs <= Date.now();
 };
 
+// The leg number a parlay busted on (earliest lost leg), or null if none lost.
+const parlayLostLegSequence = (team: ParlayTeam): number | null => {
+  const lostLeg = team.committedLegs
+    .filter((leg) => leg.result === 'LOST')
+    .sort((a, b) => a.sequence - b.sequence)[0];
+  return lostLeg ? lostLeg.sequence : null;
+};
+
 const isParlayInHistory = (team: ParlayTeam): boolean => {
   // Keep claimable parlays up top so the CLAIM action stays visible.
   if (team.canClaim) {
     return false;
   }
 
-  // Once claimed, the parlay is done — tuck it into history.
+  // Once claimed or busted on a lost leg, the parlay is done — tuck it away.
   if (team.hasClaimed) {
+    return true;
+  }
+
+  if (parlayLostLegSequence(team) !== null) {
     return true;
   }
 
@@ -1282,6 +1294,10 @@ const PortfolioPage = () => {
         <span className="mb-1 inline-flex rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 font-semibold text-[10px] text-gray-500 uppercase tracking-wide">
           Claimed
         </span>
+      ) : parlayLostLegSequence(team) !== null ? (
+        <span className="mb-1 inline-flex rounded-full border border-red-300 bg-red-50 px-2 py-0.5 font-semibold text-[10px] text-red-700 uppercase tracking-wide">
+          Lost on Leg {parlayLostLegSequence(team)}
+        </span>
       ) : parlayFirstLegStarted(team) ? (
         <span className="mb-1 inline-flex rounded-full border border-green-200 bg-green-50 px-2 py-0.5 font-semibold text-[10px] text-green-700 uppercase tracking-wide">
           Active
@@ -1704,13 +1720,18 @@ const PortfolioPage = () => {
                             <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-emerald-800 uppercase tracking-wide">
                               Current Value
                             </span>
-                            <p className="mt-1 font-semibold text-gray-900 text-sm">
-                              $
-                              {roundToCents(
-                                position.quantity *
-                                  getPositionCurrentPrice(position)
-                              ).toFixed(2)}
-                            </p>
+                            {positionCurrentPricesById[position.id] ===
+                            undefined ? (
+                              <Skeleton className="mt-1 h-5 w-16 rounded bg-gray-100" />
+                            ) : (
+                              <p className="mt-1 font-semibold text-gray-900 text-sm">
+                                $
+                                {roundToCents(
+                                  position.quantity *
+                                    getPositionCurrentPrice(position)
+                                ).toFixed(2)}
+                              </p>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -2039,10 +2060,8 @@ const PortfolioPage = () => {
                 Committed Legs
               </p>
               {selectedParlayTeam?.committedLegs.length ? (
-                <div className="relative mt-3 space-y-4">
-                  {/* Connector line down the horizontal center, behind the legs. */}
-                  <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-gray-200" />
-                  {selectedParlayTeam.committedLegs.map((leg) => {
+                <div className="mt-3 space-y-4">
+                  {selectedParlayTeam.committedLegs.map((leg, legIndex) => {
                     const metrics = teamLegMetricsById[leg.id];
                     const liveStatus = teamLegLiveStatusesById[leg.id];
                     const timeline = getLegTimelineClasses(leg, liveStatus);
@@ -2060,10 +2079,14 @@ const PortfolioPage = () => {
                     return (
                       <div
                         key={`${selectedParlayTeam.id}-${leg.positionId}`}
-                        className="relative pt-3"
+                        className="relative"
                       >
+                        {/* Connector lives only in the gap above each card. */}
+                        {legIndex > 0 ? (
+                          <div className="pointer-events-none absolute bottom-full left-1/2 h-4 w-px -translate-x-1/2 bg-gray-200" />
+                        ) : null}
                         <div
-                          className={`absolute top-0 left-1/2 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-white ${timeline.node}`}
+                          className={`absolute top-0 left-1/2 z-10 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white ${timeline.node}`}
                         />
                         <div
                           className={`relative rounded-md border bg-white px-3 py-2 ${timeline.outline}`}
@@ -2167,23 +2190,31 @@ const PortfolioPage = () => {
                               <span className="inline-flex rounded-full border border-violet-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-violet-800 uppercase tracking-wide">
                                 Current Price
                               </span>
-                              <p className="mt-1 font-semibold text-gray-900 text-sm">
-                                {metrics?.currentPrice !== null &&
-                                metrics?.currentPrice !== undefined
-                                  ? `$${metrics.currentPrice.toFixed(2)}`
-                                  : '--'}
-                              </p>
+                              {metrics === undefined ? (
+                                <Skeleton className="mt-1 h-5 w-12 rounded bg-gray-100" />
+                              ) : (
+                                <p className="mt-1 font-semibold text-gray-900 text-sm">
+                                  {metrics.currentPrice !== null &&
+                                  metrics.currentPrice !== undefined
+                                    ? `$${metrics.currentPrice.toFixed(2)}`
+                                    : '--'}
+                                </p>
+                              )}
                             </div>
                             <div className="rounded-lg border border-emerald-100 bg-white p-2">
                               <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-emerald-800 uppercase tracking-wide">
                                 Expected Payoff
                               </span>
-                              <p className="mt-1 font-semibold text-gray-900 text-sm">
-                                {metrics?.expectedPayoff !== null &&
-                                metrics?.expectedPayoff !== undefined
-                                  ? `$${metrics.expectedPayoff.toFixed(2)}`
-                                  : '--'}
-                              </p>
+                              {metrics === undefined ? (
+                                <Skeleton className="mt-1 h-5 w-14 rounded bg-gray-100" />
+                              ) : (
+                                <p className="mt-1 font-semibold text-gray-900 text-sm">
+                                  {metrics.expectedPayoff !== null &&
+                                  metrics.expectedPayoff !== undefined
+                                    ? `$${metrics.expectedPayoff.toFixed(2)}`
+                                    : '--'}
+                                </p>
+                              )}
                             </div>
                           </div>
                         </div>
