@@ -1,15 +1,18 @@
 import { auth } from '@starter/backend/auth';
 import { db } from '@starter/backend/db';
+import { eq } from '@starter/backend/orm';
 import {
   paperPortfolio,
   parlayTeam,
   parlayTeamMember,
   parlayTeamParlay,
   parlayTeamParlayClaim,
+  parlayTeamParlayRollover,
   parlayTeamParlayShare,
   userProfile,
 } from '@starter/backend/schema';
 import { createFileRoute } from '@tanstack/react-router';
+import { getLegSidePrice } from '@/server/polymarket/prices';
 
 type PositionSide = 'home' | 'draw' | 'away';
 type BuySide = 'YES' | 'NO';
@@ -65,6 +68,11 @@ type TeamCommittedLeg = {
   buySide: BuySide;
   placedAt: string;
   result: LegResolution;
+  // Compounding detail: principal vs winnings rolled in from earlier legs.
+  principalShares: number;
+  rolledInShares: number;
+  effectiveShares: number;
+  resolvedAt: string | null;
 };
 
 type ParlayTeamResponse = {
@@ -523,21 +531,21 @@ const resolveLegResult = (
   return legWon ? 'WON' : 'LOST';
 };
 
-const computeClaimableAmount = (
-  shares: Array<{ stake: number; entryPrice: number }>
-): number => {
-  if (shares.length === 0) {
-    return 0;
-  }
+type RolloverEntry = { targetShareId: string; sharesAdded: number };
 
-  let pool = roundToCents(shares[0]?.stake ?? 0);
-
-  for (let index = 1; index < shares.length; index += 1) {
-    pool = roundToCents(pool / Math.max(shares[index].entryPrice, 0.01));
-  }
-
-  return pool;
-};
+// A leg's total shares = its members' principal + every rollover that has been
+// purchased into it from earlier-resolved winning legs.
+const effectiveShares = (
+  shareId: string,
+  principal: number,
+  rollovers: RolloverEntry[]
+): number =>
+  roundToCents(
+    principal +
+      rollovers
+        .filter((rollover) => rollover.targetShareId === shareId)
+        .reduce((sum, rollover) => sum + rollover.sharesAdded, 0)
+  );
 
 const getSelectedParlay = <
   T extends { teamId: string; status: string; createdAt: Date; id: string },
@@ -559,32 +567,53 @@ const getSelectedParlay = <
   );
 };
 
+const legPriceForPosition = async (
+  marketId: string | null,
+  position: PaperPosition | null
+): Promise<number | null> => {
+  if (!marketId || !position) {
+    return null;
+  }
+
+  return getLegSidePrice({
+    marketId,
+    side: position.side,
+    buySide: position.buySide,
+    homeTeam: position.homeTeam,
+    awayTeam: position.awayTeam,
+  });
+};
+
 const syncParlayStates = async (teamIds: string[]) => {
   if (teamIds.length === 0) {
     return;
   }
 
-  const [parlays, shares, memberships, blokboyProfile] = await Promise.all([
-    db.query.parlayTeamParlay.findMany({
-      where: (table, { inArray }) => inArray(table.teamId, teamIds),
-    }),
-    db.query.parlayTeamParlayShare.findMany({
-      where: (table, { inArray }) => inArray(table.teamId, teamIds),
-    }),
-    db.query.parlayTeamMember.findMany({
-      where: (table, { inArray }) => inArray(table.teamId, teamIds),
-      columns: {
-        userId: true,
-      },
-    }),
-    db.query.userProfile.findFirst({
-      where: (table, { eq: equals }) =>
-        equals(table.username, BLOKBOY_USERNAME),
-      columns: {
-        id: true,
-      },
-    }),
-  ]);
+  const [parlays, shares, memberships, blokboyProfile, rolloverRows] =
+    await Promise.all([
+      db.query.parlayTeamParlay.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      }),
+      db.query.parlayTeamParlayShare.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      }),
+      db.query.parlayTeamMember.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+        columns: {
+          userId: true,
+        },
+      }),
+      db.query.userProfile.findFirst({
+        where: (table, { eq: equals }) =>
+          equals(table.username, BLOKBOY_USERNAME),
+        columns: {
+          id: true,
+        },
+      }),
+      db.query.parlayTeamParlayRollover.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      }),
+    ]);
 
   const activeParlays = parlays.filter((parlay) => parlay.status === 'ACTIVE');
   if (activeParlays.length === 0) {
@@ -653,22 +682,177 @@ const syncParlayStates = async (teamIds: string[]) => {
       continue;
     }
 
-    const resolvedShares = parlayShares.map((share) => {
+    // Per-leg working state. Prefer a persisted result; otherwise resolve from
+    // the live status. resolvedAt drives the rollover chronology.
+    const legState = parlayShares.map((share) => {
       const position = positionById.get(share.positionId) ?? null;
+      const persisted =
+        share.result === 'WON' || share.result === 'LOST'
+          ? (share.result as LegResolution)
+          : null;
+      const result =
+        persisted ?? resolveLegResult(position, statuses[share.id]);
       return {
         share,
-        result: resolveLegResult(position, statuses[share.id]),
+        position,
+        result,
+        persisted: persisted !== null,
+        resolvedAt: share.resolvedAt ? new Date(share.resolvedAt) : null,
       };
     });
 
-    const firstLost = resolvedShares.find((entry) => entry.result === 'LOST');
-    if (firstLost) {
-      const settledAmount = roundToCents(
-        parlayShares
-          .filter((share) => share.sequence > firstLost.share.sequence)
-          .reduce((sum, share) => sum + share.shares, 0)
+    const now = new Date();
+
+    // 1) Stamp newly-resolved legs with result + resolvedAt + a settle-price
+    // snapshot, so the chronology is fixed and we don't re-resolve later.
+    for (const leg of legState) {
+      if (leg.persisted || leg.result === 'PENDING') {
+        continue;
+      }
+
+      const settlePrice = await legPriceForPosition(
+        leg.share.marketId,
+        leg.position
       );
 
+      leg.resolvedAt = now;
+      await db
+        .update(parlayTeamParlayShare)
+        .set({
+          result: leg.result,
+          resolvedAt: now,
+          resolvedPrice: settlePrice,
+        })
+        .where(eq(parlayTeamParlayShare.id, leg.share.id));
+    }
+
+    // Working copy of this parlay's rollovers; appended to as we create more.
+    const parlayRollovers: Array<{
+      sourceShareId: string;
+      targetShareId: string;
+      sharesAdded: number;
+    }> = rolloverRows
+      .filter((rollover) => rollover.parlayId === parlay.id)
+      .map((rollover) => ({
+        sourceShareId: rollover.sourceShareId,
+        targetShareId: rollover.targetShareId,
+        sharesAdded: rollover.sharesAdded,
+      }));
+
+    // 2) Roll each winning leg's full value into the earliest leg that hadn't
+    // started yet at its resolution moment, buying at that leg's live price.
+    // Processed in resolution order so a leg's incoming rollovers exist first.
+    const wonLegs = legState
+      .filter((leg) => leg.result === 'WON')
+      .sort(
+        (a, b) =>
+          (a.resolvedAt?.getTime() ?? 0) - (b.resolvedAt?.getTime() ?? 0)
+      );
+
+    for (const leg of wonLegs) {
+      const alreadyRolled = parlayRollovers.some(
+        (rollover) => rollover.sourceShareId === leg.share.id
+      );
+      if (alreadyRolled) {
+        continue;
+      }
+
+      const value = effectiveShares(
+        leg.share.id,
+        leg.share.shares,
+        parlayRollovers
+      );
+      if (value <= 0) {
+        continue;
+      }
+
+      const resolvedAtMs = (leg.resolvedAt ?? now).getTime();
+      const target = legState
+        .filter((candidate) => {
+          if (candidate.share.id === leg.share.id) return false;
+          if (candidate.result === 'LOST') return false;
+          const kickoffMs = candidate.position
+            ? new Date(candidate.position.kickoff).getTime()
+            : Number.NaN;
+          return Number.isFinite(kickoffMs) && kickoffMs > resolvedAtMs;
+        })
+        .sort((a, b) => a.share.sequence - b.share.sequence)[0];
+
+      // No un-started successor → this leg's value is terminal (final claimable).
+      if (!target) {
+        continue;
+      }
+
+      const targetPrice = await legPriceForPosition(
+        target.share.marketId,
+        target.position
+      );
+      if (!targetPrice || targetPrice <= 0) {
+        // Can't price the target yet; retry on the next sync.
+        continue;
+      }
+
+      const sharesAdded = roundToCents(value / targetPrice);
+      await db.insert(parlayTeamParlayRollover).values({
+        parlayId: parlay.id,
+        teamId: parlay.teamId,
+        sourceShareId: leg.share.id,
+        targetShareId: target.share.id,
+        amount: roundToCents(value),
+        targetPrice,
+        sharesAdded,
+      });
+      parlayRollovers.push({
+        sourceShareId: leg.share.id,
+        targetShareId: target.share.id,
+        sharesAdded,
+      });
+    }
+
+    // 3) Any loss busts the parlay. Everything downstream of the earliest-start
+    // loser (by start order) is sold at current value and sent to blokboy.
+    const lostLegs = legState
+      .filter((leg) => leg.result === 'LOST')
+      .sort((a, b) => a.share.sequence - b.share.sequence);
+
+    if (lostLegs.length > 0) {
+      const lossSequence = lostLegs[0].share.sequence;
+
+      let settledAmount = 0;
+      for (const leg of legState) {
+        if (leg.share.sequence <= lossSequence) {
+          continue;
+        }
+
+        // Skip legs whose value already rolled forward into a later leg — it is
+        // captured in that target's effective shares (avoids double counting).
+        const rolledForward = parlayRollovers.some(
+          (rollover) => rollover.sourceShareId === leg.share.id
+        );
+        if (rolledForward) {
+          continue;
+        }
+
+        const legShares = effectiveShares(
+          leg.share.id,
+          leg.share.shares,
+          parlayRollovers
+        );
+        if (legShares <= 0) {
+          continue;
+        }
+
+        // Won downstream legs are worth their full $1/share; otherwise sell at
+        // the current market price.
+        const sellPrice =
+          leg.result === 'WON'
+            ? 1
+            : ((await legPriceForPosition(leg.share.marketId, leg.position)) ??
+              0);
+        settledAmount += legShares * sellPrice;
+      }
+
+      settledAmount = roundToCents(settledAmount);
       if (settledAmount > 0 && blokboyProfile?.id) {
         await creditUserCash(blokboyProfile.id, settledAmount);
       }
@@ -684,7 +868,7 @@ const syncParlayStates = async (teamIds: string[]) => {
           settledAmount,
           settledAt: new Date(),
           transferredToUserId: blokboyProfile?.id ?? null,
-          lossSequence: firstLost.share.sequence,
+          lossSequence,
         })
         .onConflictDoUpdate({
           target: parlayTeamParlay.id,
@@ -694,7 +878,7 @@ const syncParlayStates = async (teamIds: string[]) => {
             settledAmount,
             settledAt: new Date(),
             transferredToUserId: blokboyProfile?.id ?? null,
-            lossSequence: firstLost.share.sequence,
+            lossSequence,
             updatedAt: new Date(),
           },
         });
@@ -702,14 +886,25 @@ const syncParlayStates = async (teamIds: string[]) => {
       continue;
     }
 
-    const allWon = resolvedShares.every((entry) => entry.result === 'WON');
+    // 4) All legs won → claimable is the sum of every terminal leg's value
+    // (won legs whose value didn't roll forward into another leg).
+    const allWon = legState.every((leg) => leg.result === 'WON');
     if (allWon) {
-      const claimableAmount = computeClaimableAmount(
-        parlayShares.map((share) => ({
-          stake: share.stake,
-          entryPrice: share.entryPrice,
-        }))
-      );
+      let claimableAmount = 0;
+      for (const leg of legState) {
+        const rolledForward = parlayRollovers.some(
+          (rollover) => rollover.sourceShareId === leg.share.id
+        );
+        if (rolledForward) {
+          continue;
+        }
+        claimableAmount += effectiveShares(
+          leg.share.id,
+          leg.share.shares,
+          parlayRollovers
+        );
+      }
+      claimableAmount = roundToCents(claimableAmount);
 
       await db
         .insert(parlayTeamParlay)
@@ -750,23 +945,27 @@ const buildTeamResponses = async (
     // ignore live sync failures and still return team payloads
   }
 
-  const [teams, members, parlays, shares, claims] = await Promise.all([
-    db.query.parlayTeam.findMany({
-      where: (table, { inArray }) => inArray(table.id, teamIds),
-    }),
-    db.query.parlayTeamMember.findMany({
-      where: (table, { inArray }) => inArray(table.teamId, teamIds),
-    }),
-    db.query.parlayTeamParlay.findMany({
-      where: (table, { inArray }) => inArray(table.teamId, teamIds),
-    }),
-    db.query.parlayTeamParlayShare.findMany({
-      where: (table, { inArray }) => inArray(table.teamId, teamIds),
-    }),
-    db.query.parlayTeamParlayClaim.findMany({
-      where: (table, { inArray }) => inArray(table.teamId, teamIds),
-    }),
-  ]);
+  const [teams, members, parlays, shares, claims, rollovers] =
+    await Promise.all([
+      db.query.parlayTeam.findMany({
+        where: (table, { inArray }) => inArray(table.id, teamIds),
+      }),
+      db.query.parlayTeamMember.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      }),
+      db.query.parlayTeamParlay.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      }),
+      db.query.parlayTeamParlayShare.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      }),
+      db.query.parlayTeamParlayClaim.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      }),
+      db.query.parlayTeamParlayRollover.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      }),
+    ]);
 
   const userIds = Array.from(
     new Set([
@@ -866,6 +1065,11 @@ const buildTeamResponses = async (
         .sort((a, b) => a.sequence - b.sequence)
         .map<TeamCommittedLeg>((share) => {
           const position = positionById.get(share.positionId) ?? null;
+          const rolledInShares = roundToCents(
+            rollovers
+              .filter((rollover) => rollover.targetShareId === share.id)
+              .reduce((sum, rollover) => sum + rollover.sharesAdded, 0)
+          );
 
           return {
             id: share.id,
@@ -888,7 +1092,16 @@ const buildTeamResponses = async (
             positionSide: position?.side ?? 'draw',
             buySide: position?.buySide ?? (share.side === 'NO' ? 'NO' : 'YES'),
             placedAt: share.placedAt.toISOString(),
-            result: resolveLegResult(position, statuses[share.id]),
+            result:
+              share.result === 'WON' || share.result === 'LOST'
+                ? (share.result as LegResolution)
+                : resolveLegResult(position, statuses[share.id]),
+            principalShares: roundToCents(share.shares),
+            rolledInShares,
+            effectiveShares: roundToCents(share.shares + rolledInShares),
+            resolvedAt: share.resolvedAt
+              ? new Date(share.resolvedAt).toISOString()
+              : null,
           };
         });
 
@@ -1259,18 +1472,20 @@ export const Route = createFileRoute('/api/parlay-teams')({
               ),
           });
 
+          // Legs are ordered by kickoff, so the parlay locks once the
+          // earliest-starting leg has kicked off — not the first one added.
           if (existingShares.length > 0) {
-            const firstShare = [...existingShares].sort(
-              (a, b) => a.sequence - b.sequence
-            )[0];
-            const firstPosition = positionById.get(firstShare.positionId);
-            const firstKickoffMs = firstPosition
-              ? new Date(firstPosition.kickoff).getTime()
-              : Number.NaN;
+            const earliestKickoffMs = existingShares.reduce((min, share) => {
+              const sharePosition = positionById.get(share.positionId);
+              const ms = sharePosition
+                ? new Date(sharePosition.kickoff).getTime()
+                : Number.NaN;
+              return Number.isFinite(ms) ? Math.min(min, ms) : min;
+            }, Number.POSITIVE_INFINITY);
 
             if (
-              Number.isFinite(firstKickoffMs) &&
-              firstKickoffMs <= Date.now()
+              Number.isFinite(earliestKickoffMs) &&
+              earliestKickoffMs <= Date.now()
             ) {
               return Response.json(
                 {
@@ -1284,20 +1499,25 @@ export const Route = createFileRoute('/api/parlay-teams')({
             }
           }
 
-          const alreadyCommittedByUserForPosition = roundToCents(
-            existingShares
-              .filter(
-                (share) =>
-                  share.positionId === body.positionId &&
-                  share.addedByUserId === user.id
-              )
-              .reduce((sum, share) => sum + share.shares, 0)
+          // One time, one direction: a position can be committed to a parlay
+          // exactly once and the shares can't be withdrawn afterward.
+          const positionAlreadyCommitted = existingShares.some(
+            (share) => share.positionId === body.positionId
           );
 
-          if (
-            targetShares + alreadyCommittedByUserForPosition >
-            targetPosition.quantity
-          ) {
+          if (positionAlreadyCommitted) {
+            return Response.json(
+              {
+                ok: false,
+                error: 'POSITION_ALREADY_COMMITTED',
+                message:
+                  'Shares from this position are already committed to the Parlay Team and cannot be withdrawn or re-committed.',
+              },
+              { status: 400 }
+            );
+          }
+
+          if (targetShares > targetPosition.quantity) {
             return Response.json(
               {
                 ok: false,
@@ -1356,6 +1576,72 @@ export const Route = createFileRoute('/api/parlay-teams')({
             stake: roundToCents(targetShares * targetPosition.entryPrice),
             entryPrice: roundToCents(targetPosition.entryPrice),
           });
+
+          // Deduct the committed shares from the user's position — the shares
+          // leave the portfolio and can't be sold or withdrawn until the parlay
+          // concludes with a victory.
+          const remainingQuantity = roundToCents(
+            targetPosition.quantity - targetShares
+          );
+          const remainingStake = roundToCents(
+            Math.max(
+              0,
+              targetPosition.stake - targetShares * targetPosition.entryPrice
+            )
+          );
+          const nextPositions = currentUserPositions.map((position) =>
+            position.id === targetPosition.id
+              ? {
+                  ...position,
+                  quantity: Math.max(0, remainingQuantity),
+                  stake: remainingStake,
+                  status:
+                    remainingQuantity <= 0
+                      ? ('CLOSED' as const)
+                      : position.status,
+                }
+              : position
+          );
+
+          await db
+            .update(paperPortfolio)
+            .set({ positions: nextPositions, updatedAt: new Date() })
+            .where(eq(paperPortfolio.userId, user.id));
+
+          // Legs are always ordered by kickoff; renumber the whole parlay so
+          // "Leg N" reflects chronological start order after this insert.
+          const parlaySharesForOrdering =
+            await db.query.parlayTeamParlayShare.findMany({
+              where: (table, { eq: equals }) =>
+                equals(table.parlayId, ensuredParlay.id),
+              columns: { id: true, positionId: true, placedAt: true },
+            });
+
+          const orderedShares = parlaySharesForOrdering
+            .map((share) => {
+              const sharePosition =
+                positionById.get(share.positionId) ??
+                (share.positionId === targetPosition.id
+                  ? targetPosition
+                  : undefined);
+              const ms = sharePosition
+                ? new Date(sharePosition.kickoff).getTime()
+                : new Date(share.placedAt).getTime();
+              return {
+                id: share.id,
+                ms: Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER,
+              };
+            })
+            .sort((a, b) => a.ms - b.ms);
+
+          await Promise.all(
+            orderedShares.map((entry, index) =>
+              db
+                .update(parlayTeamParlayShare)
+                .set({ sequence: index + 1 })
+                .where(eq(parlayTeamParlayShare.id, entry.id))
+            )
+          );
         } else if (body.action === 'claim') {
           const winningParlay = getSelectedParlay(
             teamId,

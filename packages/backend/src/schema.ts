@@ -292,6 +292,34 @@ export const parlayTeamParlayShare = pgTable('parlay_team_parlay_share', {
   shares: real().notNull(),
   stake: real().notNull(),
   entryPrice: real().notNull(),
+  // Settlement state, stamped the first time the leg resolves to a winner/loser.
+  result: text(),
+  resolvedAt: timestamp(),
+  resolvedPrice: real(),
+  createdAt: timestamp().defaultNow().notNull(),
+}).enableRLS();
+
+// One row per rollover event: a winning leg's value buying additional shares in
+// the next un-started leg at that leg's market price at the funding moment.
+export const parlayTeamParlayRollover = pgTable('parlay_team_parlay_rollover', {
+  id: text()
+    .primaryKey()
+    .$defaultFn(() => uuid()),
+  parlayId: text()
+    .notNull()
+    .references(() => parlayTeamParlay.id, { onDelete: 'cascade' }),
+  teamId: text()
+    .notNull()
+    .references(() => parlayTeam.id, { onDelete: 'cascade' }),
+  sourceShareId: text()
+    .notNull()
+    .references(() => parlayTeamParlayShare.id, { onDelete: 'cascade' }),
+  targetShareId: text()
+    .notNull()
+    .references(() => parlayTeamParlayShare.id, { onDelete: 'cascade' }),
+  amount: real().notNull(),
+  targetPrice: real().notNull(),
+  sharesAdded: real().notNull(),
   createdAt: timestamp().defaultNow().notNull(),
 }).enableRLS();
 

@@ -61,6 +61,10 @@ type TeamCommittedLeg = {
   buySide: BuySide;
   placedAt: string;
   result: 'PENDING' | 'WON' | 'LOST';
+  principalShares: number;
+  rolledInShares: number;
+  effectiveShares: number;
+  resolvedAt: string | null;
 };
 
 type ParlayTeam = {
@@ -485,7 +489,6 @@ const PortfolioPage = () => {
     Record<string, LiveStatus>
   >({});
   const teamLegLiveStatusesRef = useRef<Record<string, LiveStatus>>({});
-  const [rolloverLegId, setRolloverLegId] = useState<string | null>(null);
   const [sellPosition, setSellPosition] = useState<PaperPosition | null>(null);
   const [sellDetail, setSellDetail] = useState<MarketDetail | null>(null);
   const [sellShares, setSellShares] = useState(0);
@@ -754,13 +757,18 @@ const PortfolioPage = () => {
       return false;
     }
 
-    const firstLeg = [...selectedParlayTeam.committedLegs].sort(
-      (a, b) => a.sequence - b.sequence
-    )[0];
-    const firstLegKickoffMs = new Date(firstLeg.kickoff).getTime();
+    // Legs are ordered by kickoff; the parlay locks once the earliest-starting
+    // leg has kicked off.
+    const earliestKickoffMs = selectedParlayTeam.committedLegs.reduce(
+      (min, leg) => {
+        const ms = new Date(leg.kickoff).getTime();
+        return Number.isFinite(ms) ? Math.min(min, ms) : min;
+      },
+      Number.POSITIVE_INFINITY
+    );
 
     return (
-      Number.isFinite(firstLegKickoffMs) && firstLegKickoffMs <= Date.now()
+      Number.isFinite(earliestKickoffMs) && earliestKickoffMs <= Date.now()
     );
   }, [selectedParlayTeam]);
 
@@ -909,7 +917,7 @@ const PortfolioPage = () => {
             leg.id,
             {
               currentPrice,
-              expectedPayoff: roundToCents(leg.shares * currentPrice),
+              expectedPayoff: roundToCents(leg.effectiveShares * currentPrice),
             },
           ] as const;
         })
@@ -1185,7 +1193,10 @@ const PortfolioPage = () => {
               {/* summary stat cards */}
               <div className="mb-6 grid gap-4 sm:grid-cols-2">
                 {[0, 1].map((i) => (
-                  <div key={i} className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div
+                    key={i}
+                    className="rounded-lg border border-gray-200 bg-white p-4"
+                  >
                     <Skeleton className="mb-2 h-3 w-24 rounded bg-gray-100" />
                     <Skeleton className="h-8 w-32 rounded bg-gray-100" />
                   </div>
@@ -1195,7 +1206,10 @@ const PortfolioPage = () => {
               {/* position card skeletons */}
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                  <div
+                    key={i}
+                    className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
+                  >
                     <Skeleton className="mb-3 h-5 w-40 rounded bg-gray-100" />
                     <div className="mb-3 flex items-center gap-2">
                       <Skeleton className="h-6 w-6 rounded bg-gray-100" />
@@ -1221,7 +1235,10 @@ const PortfolioPage = () => {
                 <Skeleton className="mb-3 h-4 w-32 rounded bg-gray-100" />
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {[0, 1].map((i) => (
-                    <div key={i} className="rounded-2xl border border-gray-200 bg-white p-4">
+                    <div
+                      key={i}
+                      className="rounded-2xl border border-gray-200 bg-white p-4"
+                    >
                       <Skeleton className="mb-2 h-5 w-36 rounded bg-gray-100" />
                       <div className="mb-2 flex gap-2">
                         <Skeleton className="h-5 w-20 rounded-full bg-gray-100" />
@@ -1717,36 +1734,11 @@ const PortfolioPage = () => {
                             <p className="font-medium text-gray-900 text-sm">
                               {leg.cardTitle}
                             </p>
-                            {rolloverLegId === leg.id ? (
-                              <div className="flex flex-col items-end gap-1.5">
-                                <div className="flex gap-1.5">
-                                  <button
-                                    type="button"
-                                    className="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 font-semibold text-[11px] text-emerald-700"
-                                  >
-                                    Submit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setRolloverLegId(null)}
-                                    className="rounded-full border border-gray-300 bg-white px-2.5 py-0.5 font-semibold text-[11px] text-gray-600"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                                <p className="max-w-[180px] text-right text-[10px] text-amber-700 leading-tight">
-                                  WARNING! You are about to close out your leg and roll your profits into the next leg.
-                                </p>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setRolloverLegId(leg.id)}
-                                className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 font-semibold text-[11px] text-violet-700"
-                              >
-                                Rollover
-                              </button>
-                            )}
+                            {leg.rolledInShares > 0 ? (
+                              <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 font-semibold text-[11px] text-violet-700">
+                                +{leg.rolledInShares.toFixed(2)} rolled in
+                              </span>
+                            ) : null}
                           </div>
 
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -1765,8 +1757,14 @@ const PortfolioPage = () => {
                             <div className="rounded border border-gray-200 bg-white px-2 py-1">
                               <p className="text-gray-500">Shares</p>
                               <p className="font-semibold text-gray-900">
-                                {leg.shares.toFixed(2)}
+                                {leg.effectiveShares.toFixed(2)}
                               </p>
+                              {leg.rolledInShares > 0 ? (
+                                <p className="text-[10px] text-gray-500">
+                                  {leg.principalShares.toFixed(2)} principal +{' '}
+                                  {leg.rolledInShares.toFixed(2)} rolled
+                                </p>
+                              ) : null}
                             </div>
                             <div className="rounded border border-gray-200 bg-white px-2 py-1">
                               <p className="text-gray-500">Entry Price</p>
@@ -1903,6 +1901,15 @@ const PortfolioPage = () => {
                   </div>
                 ) : null}
 
+                {selectedTeamPosition ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800 leading-snug">
+                    Heads up: committed shares leave this position and{' '}
+                    <span className="font-semibold">cannot be withdrawn</span>{' '}
+                    until the Parlay concludes with a victory. Shares can only
+                    be sent once, and only in one direction.
+                  </div>
+                ) : null}
+
                 {teamModalFeedback ? (
                   <div className="rounded-md border border-indigo-200 bg-white px-3 py-2 text-indigo-700 text-sm">
                     {teamModalFeedback}
@@ -2033,8 +2040,8 @@ const PortfolioPage = () => {
                 </button>
 
                 <p className="text-sm text-violet-700">
-                  Current market price ({sellPosition?.buySide ?? '--'}):{' '}
-                  ${selectedSellPrice.toFixed(2)}
+                  Current market price ({sellPosition?.buySide ?? '--'}): $
+                  {selectedSellPrice.toFixed(2)}
                 </p>
 
                 <div className="flex items-center justify-between">
