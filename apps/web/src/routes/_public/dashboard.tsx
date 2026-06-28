@@ -423,6 +423,92 @@ const FlagButton = ({
   );
 };
 
+type ResolvedPrices = Record<string, { home: number; draw: number; away: number }>;
+
+const StatusBadge = ({
+  card,
+  status,
+  resolvedPrices,
+}: {
+  card: MarketCard;
+  status: LiveStatus | undefined;
+  resolvedPrices: ResolvedPrices;
+}) => {
+  if (!status?.isFinal) {
+    return (
+      <span className="inline-block rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-xs">
+        {formatLiveSummary(status, status?.statusLabel ?? 'OPEN')}
+      </span>
+    );
+  }
+
+  // Use fresh Polymarket prices to determine the winner — the resolved
+  // side will have yesPrice ≈ 1.0, losing sides ≈ 0.0.
+  const prices = resolvedPrices[card.id];
+  const homeP = prices?.home ?? card.homeLeg.yesPrice;
+  const drawP = prices?.draw ?? card.drawLeg.yesPrice;
+  const awayP = prices?.away ?? card.awayLeg.yesPrice;
+  const maxP = Math.max(homeP, drawP, awayP);
+
+  // Only claim a winner once Polymarket prices are clearly resolved.
+  const winner =
+    maxP >= 0.85
+      ? homeP === maxP
+        ? 'home'
+        : awayP === maxP
+          ? 'away'
+          : 'draw'
+      : null;
+
+  const scoreLabel =
+    status.scoreLabel ??
+    (status.homeScore !== null && status.awayScore !== null
+      ? `${status.homeScore}-${status.awayScore}`
+      : null);
+
+  if (winner === 'home' || winner === 'away') {
+    const winnerTeam = winner === 'home' ? card.home : card.away;
+    const palette = getTeamButtonPalette(winnerTeam);
+    return (
+      <span
+        style={{
+          backgroundColor: palette.background,
+          color: palette.color,
+          borderColor: palette.border,
+        }}
+        className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium text-xs"
+      >
+        {winnerTeam.logo ? (
+          <img
+            src={winnerTeam.logo}
+            alt=""
+            className="h-3 w-4 rounded-sm object-cover"
+          />
+        ) : null}
+        <span>{winnerTeam.name}</span>
+        {scoreLabel ? (
+          <span className="opacity-75">· {scoreLabel}</span>
+        ) : null}
+      </span>
+    );
+  }
+
+  if (winner === 'draw') {
+    return (
+      <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700 text-xs">
+        Draw{scoreLabel ? ` · ${scoreLabel}` : ''}
+      </span>
+    );
+  }
+
+  // Final but Polymarket hasn't fully resolved yet — show score/status.
+  return (
+    <span className="inline-block rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-xs">
+      {formatLiveSummary(status, 'Final')}
+    </span>
+  );
+};
+
 const DashboardPage = () => {
   const [markets, setMarkets] = useState<MarketItem[]>([]);
   const [teamBrands, setTeamBrands] = useState<Record<string, TeamBranding>>(
@@ -440,6 +526,8 @@ const DashboardPage = () => {
   const [pickSide, setPickSide] = useState<'YES' | 'NO'>('YES');
   const [availableBalance, setAvailableBalance] = useState(1000);
 
+  const [resolvedPrices, setResolvedPrices] = useState<ResolvedPrices>({});
+  const fetchedFinalIds = useRef(new Set<string>());
   const [buying, setBuying] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userTimeZone, setUserTimeZone] = useState('UTC');
@@ -504,6 +592,61 @@ const DashboardPage = () => {
   useEffect(() => {
     liveStatusesRef.current = liveStatuses;
   }, [liveStatuses]);
+
+  // When a card becomes final, fetch fresh Polymarket prices for all three
+  // sides so we can identify the resolved (winning) outcome accurately.
+  useEffect(() => {
+    const cardsToFetch = marketCards.filter(
+      (card) =>
+        liveStatuses[card.id]?.isFinal && !fetchedFinalIds.current.has(card.id)
+    );
+
+    if (cardsToFetch.length === 0) return;
+
+    for (const card of cardsToFetch) {
+      fetchedFinalIds.current.add(card.id);
+    }
+
+    let cancelled = false;
+
+    Promise.all(
+      cardsToFetch.map(async (card) => {
+        const base = {
+          marketId: card.id,
+          matchup: card.matchup,
+          kickoff: card.kickoffIso,
+          homeTeam: card.home.name,
+          awayTeam: card.away.name,
+        };
+        const [homeDetail, drawDetail, awayDetail] = await Promise.all([
+          fetchMarketDetail({ ...base, side: 'home', selectionLabel: card.home.name }),
+          fetchMarketDetail({ ...base, side: 'draw', selectionLabel: 'Draw' }),
+          fetchMarketDetail({ ...base, side: 'away', selectionLabel: card.away.name }),
+        ]);
+        return [
+          card.id,
+          {
+            home: homeDetail?.yesPrice ?? card.homeLeg.yesPrice,
+            draw: drawDetail?.yesPrice ?? card.drawLeg.yesPrice,
+            away: awayDetail?.yesPrice ?? card.awayLeg.yesPrice,
+          },
+        ] as const;
+      })
+    )
+      .then((entries) => {
+        if (!cancelled) {
+          setResolvedPrices((prev) => ({
+            ...prev,
+            ...Object.fromEntries(entries),
+          }));
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [liveStatuses, marketCards]);
 
   useEffect(() => {
     if (marketCards.length === 0) {
@@ -752,9 +895,11 @@ const DashboardPage = () => {
                   <h3 className="font-semibold text-lg text-violet-950">
                     {card.matchup}
                   </h3>
-                  <span className="inline-block rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-xs">
-                    {formatLiveSummary(liveStatuses[card.id], liveStatuses[card.id]?.statusLabel ?? 'OPEN')}
-                  </span>
+                  <StatusBadge
+                    card={card}
+                    status={liveStatuses[card.id]}
+                    resolvedPrices={resolvedPrices}
+                  />
                 </div>
 
                 <div className="mb-4 flex items-center gap-2 text-violet-800/80 text-xs">
