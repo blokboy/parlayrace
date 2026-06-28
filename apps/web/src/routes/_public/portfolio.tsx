@@ -168,6 +168,132 @@ const countryNameToFlag = (name: string): string => {
     .join('');
 };
 
+type TeamButtonPalette = {
+  background: string;
+  color: string;
+  border: string;
+};
+
+const normalizeHexColor = (input: string | null | undefined): string | null => {
+  if (!input) {
+    return null;
+  }
+
+  const value = input.trim();
+  return /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(value) ? value : null;
+};
+
+const getTextColorForBackground = (backgroundHex: string): string => {
+  const hex = backgroundHex.replace('#', '');
+  const expanded =
+    hex.length === 3
+      ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+      : hex;
+
+  const red = Number.parseInt(expanded.slice(0, 2), 16);
+  const green = Number.parseInt(expanded.slice(2, 4), 16);
+  const blue = Number.parseInt(expanded.slice(4, 6), 16);
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+
+  return luminance > 0.65 ? '#111827' : '#ffffff';
+};
+
+const darkenHexColor = (hexColor: string, factor: number): string => {
+  const hex = hexColor.replace('#', '');
+  const expanded =
+    hex.length === 3
+      ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+      : hex;
+
+  const channel = (start: number) =>
+    Math.max(
+      0,
+      Math.floor(
+        Number.parseInt(expanded.slice(start, start + 2), 16) * (1 - factor)
+      )
+    );
+  const toHex = (value: number) => value.toString(16).padStart(2, '0');
+  return `#${toHex(channel(0))}${toHex(channel(2))}${toHex(channel(4))}`;
+};
+
+const getTeamButtonPalette = (team: {
+  color: string | null;
+}): TeamButtonPalette => {
+  const normalizedColor = normalizeHexColor(team.color);
+
+  if (!normalizedColor) {
+    return { background: '#ffffff', color: '#4c1d95', border: '#c4b5fd' };
+  }
+
+  return {
+    background: normalizedColor,
+    color: getTextColorForBackground(normalizedColor),
+    border: darkenHexColor(normalizedColor, 0.18),
+  };
+};
+
+// Palette for a position/leg's chosen side — the team's color, or the default
+// purple for a draw (or an unknown color).
+const paletteForSelection = (
+  selection: { side: PositionSide; homeTeam: string; awayTeam: string } | null,
+  branding: Record<string, TeamBranding>
+): TeamButtonPalette => {
+  if (!selection || selection.side === 'draw') {
+    return getTeamButtonPalette({ color: null });
+  }
+
+  const teamName =
+    selection.side === 'home' ? selection.homeTeam : selection.awayTeam;
+  return getTeamButtonPalette({ color: branding[teamName]?.color ?? null });
+};
+
+// The outcome a leg is hoping for: MLB shows team name + logo; FIFA shows
+// country name + flag + the side picked; a draw stays purple.
+const LegOutcomeBadge = ({
+  leg,
+  branding,
+}: {
+  leg: TeamCommittedLeg;
+  branding: Record<string, TeamBranding>;
+}) => {
+  if (leg.positionSide === 'draw') {
+    return (
+      <span className="inline-flex items-center rounded-full border border-violet-300 bg-violet-100 px-2 py-0.5 font-semibold text-[11px] text-violet-800">
+        Draw
+      </span>
+    );
+  }
+
+  const teamName = leg.positionSide === 'home' ? leg.homeTeam : leg.awayTeam;
+  const brand = branding[teamName];
+  const palette = getTeamButtonPalette({ color: brand?.color ?? null });
+  const flag = countryNameToFlag(teamName);
+  const isMlb = Boolean(brand?.logo);
+
+  return (
+    <span
+      style={{
+        backgroundColor: palette.background,
+        color: palette.color,
+        borderColor: palette.border,
+      }}
+      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold text-[11px]"
+    >
+      {isMlb ? (
+        <img
+          src={brand?.logo}
+          alt=""
+          className="h-3.5 w-3.5 object-cover"
+        />
+      ) : flag ? (
+        <span className="text-[12px] leading-none">{flag}</span>
+      ) : null}
+      <span>{teamName}</span>
+      {isMlb ? null : <span className="opacity-80">· {leg.buySide}</span>}
+    </span>
+  );
+};
+
 const formatLiveSummary = (
   status: LiveStatus | undefined,
   fallback: string
@@ -1145,6 +1271,12 @@ const PortfolioPage = () => {
 
   const expectedSellValue = roundToCents(sellShares * selectedSellPrice);
 
+  const addSharesPalette = paletteForSelection(
+    selectedTeamPosition,
+    teamBrandingByName
+  );
+  const sellPalette = paletteForSelection(sellPosition, teamBrandingByName);
+
   const handleConfirmSell = async () => {
     if (
       !sellPosition ||
@@ -1716,16 +1848,19 @@ const PortfolioPage = () => {
             </p>
             <DialogClose
               aria-label="Close parlay team modal"
-              className="absolute top-4 right-4 rounded-sm p-1 text-violet-700 transition hover:bg-violet-100"
+              className="absolute top-4 right-4 rounded-full border border-violet-200 bg-white px-3 py-1 font-semibold text-violet-700 text-xs transition hover:border-violet-300 hover:bg-violet-50"
               disabled={committingShare}
             >
-              x
+              Close
             </DialogClose>
           </DialogHeader>
 
           <div className="space-y-4">
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="mb-2 flex flex-wrap gap-2">
+                <span className="inline-flex rounded-full border border-violet-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-violet-800">
+                  {selectedParlayTeam?.status ?? 'ACTIVE'}
+                </span>
                 <span className="inline-flex rounded-full border border-amber-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-amber-800">
                   Stake $
                   {(
@@ -1739,9 +1874,6 @@ const PortfolioPage = () => {
                     teamMetricsById[selectedParlayTeam?.id ?? '']
                       ?.potentialPayout ?? 0
                   ).toFixed(2)}
-                </span>
-                <span className="inline-flex rounded-full border border-violet-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-violet-800">
-                  {selectedParlayTeam?.status ?? 'ACTIVE'}
                 </span>
               </div>
               <p className="text-gray-600 text-sm">
@@ -1791,6 +1923,10 @@ const PortfolioPage = () => {
                             <span className="inline-flex rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-700">
                               {leg.addedByUsername}
                             </span>
+                            <LegOutcomeBadge
+                              leg={leg}
+                              branding={teamBrandingByName}
+                            />
                           </div>
 
                           <div className="mt-2 flex items-start justify-between gap-2">
@@ -2022,7 +2158,12 @@ const PortfolioPage = () => {
                     sharesToCommit <= 0 ||
                     committingShare
                   }
-                  className="inline-flex w-full items-center justify-center rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{
+                    backgroundColor: addSharesPalette.background,
+                    color: addSharesPalette.color,
+                    borderColor: addSharesPalette.border,
+                  }}
+                  className="inline-flex w-full items-center justify-center rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {committingShare
                     ? 'Adding Shares...'
@@ -2061,10 +2202,10 @@ const PortfolioPage = () => {
             </p>
             <DialogClose
               aria-label="Close trade modal"
-              className="absolute top-4 right-4 rounded-sm p-1 text-violet-700 transition hover:bg-violet-100"
+              className="absolute top-4 right-4 rounded-full border border-violet-200 bg-white px-3 py-1 font-semibold text-violet-700 text-xs transition hover:border-violet-300 hover:bg-violet-50"
               disabled={selling}
             >
-              x
+              Close
             </DialogClose>
           </DialogHeader>
 
@@ -2130,7 +2271,12 @@ const PortfolioPage = () => {
                     sellShares <= 0
                   }
                   onClick={() => void handleConfirmSell()}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{
+                    backgroundColor: sellPalette.background,
+                    color: sellPalette.color,
+                    borderColor: sellPalette.border,
+                  }}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <span>Confirm SELL</span>
                   <span>${selectedSellPrice.toFixed(2)}</span>
