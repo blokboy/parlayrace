@@ -86,7 +86,10 @@ const resolveEventTeams = (
   };
 };
 
-const WIN_TITLE_REGEX = /\b(to win|beat|wins|will win|defeat)\b/i;
+// Match moneyline questions like "Will Brazil win on 2026-06-29?", "Brazil to
+// win", "Brazil beat Japan", etc. A bare "win" must be included — Polymarket's
+// win markets read "Will <team> win ..." where "will" and "win" aren't adjacent.
+const WIN_TITLE_REGEX = /\b(win|wins|won|beat|beats|defeat|defeats)\b/i;
 const DRAW_TITLE_REGEX = /\bdraw\b/i;
 
 const parseJsonArray = (value: string | string[] | null | undefined): string[] => {
