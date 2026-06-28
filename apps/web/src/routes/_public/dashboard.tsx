@@ -845,6 +845,7 @@ const DashboardPage = () => {
   // MLB markets are two-outcome (no draw), so picking a team is an implicit
   // "YES" on that team — there's no YES/NO choice to surface.
   const isMlbTrade = selectedTrade?.category === 'mlb-games';
+  const isDrawTrade = selectedTrade?.side === 'draw';
 
   // Color the modal's action buttons with the chosen team's palette.
   const selectedTeamName =
@@ -985,10 +986,10 @@ const DashboardPage = () => {
                   ? setActiveLeagues(new Set())
                   : toggleLeague(badge.key as LeagueCategory)
               }
-              className={`rounded-full border bg-white px-3 py-1 font-semibold text-xs uppercase tracking-wide transition ${
+              className={`!bg-white rounded-full border px-3 py-1 font-semibold text-xs uppercase tracking-wide transition ${
                 badge.active
                   ? 'border-violet-500 text-violet-900 ring-1 ring-violet-400'
-                  : 'border-violet-200 text-violet-500 hover:border-violet-300 hover:bg-violet-50'
+                  : 'border-violet-200 text-violet-500 hover:border-violet-300 hover:!bg-violet-50'
               }`}
             >
               {badge.label}
@@ -1159,20 +1160,7 @@ const DashboardPage = () => {
                       <button
                         type="button"
                         onClick={() => setPickSide('YES')}
-                        className="rounded-full border px-3 py-2 font-semibold text-sm transition"
-                        style={
-                          pickSide === 'YES'
-                            ? {
-                                backgroundColor: selectedPalette.background,
-                                color: selectedPalette.color,
-                                borderColor: selectedPalette.border,
-                              }
-                            : {
-                                backgroundColor: '#ffffff',
-                                color: selectedPalette.border,
-                                borderColor: selectedPalette.border,
-                              }
-                        }
+                        className={`rounded-full border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-400 bg-emerald-500 text-white' : '!bg-white border-emerald-300 text-emerald-700 hover:!bg-emerald-50'}`}
                       >
                         YES{' '}
                         {marketDetail
@@ -1182,20 +1170,7 @@ const DashboardPage = () => {
                       <button
                         type="button"
                         onClick={() => setPickSide('NO')}
-                        className="rounded-full border px-3 py-2 font-semibold text-sm transition"
-                        style={
-                          pickSide === 'NO'
-                            ? {
-                                backgroundColor: selectedPalette.background,
-                                color: selectedPalette.color,
-                                borderColor: selectedPalette.border,
-                              }
-                            : {
-                                backgroundColor: '#ffffff',
-                                color: selectedPalette.border,
-                                borderColor: selectedPalette.border,
-                              }
-                        }
+                        className={`rounded-full border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-400 bg-rose-500 text-white' : '!bg-white border-rose-300 text-rose-700 hover:!bg-rose-50'}`}
                       >
                         NO{' '}
                         {marketDetail
@@ -1227,9 +1202,9 @@ const DashboardPage = () => {
                   className="inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <span>
-                    {isMlbTrade
-                      ? `Confirm ${selectedTrade?.selectionLabel ?? ''}`
-                      : `Confirm BUY ${pickSide}`}
+                    {isDrawTrade
+                      ? `Confirm BUY ${pickSide}`
+                      : `Confirm ${selectedTrade?.selectionLabel ?? ''}`}
                   </span>
                   <span>${selectedPrice.toFixed(2)}</span>
                 </button>
