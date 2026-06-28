@@ -171,27 +171,25 @@ const formatLiveSummary = (
     return fallback;
   }
 
+  const scoreLabel =
+    status.scoreLabel ??
+    (status.homeScore !== null && status.awayScore !== null
+      ? `${status.homeScore}-${status.awayScore}`
+      : null);
+
+  if (scoreLabel && (status.eventTime ?? status.statusLabel)) {
+    return `${scoreLabel} • ${status.eventTime ?? status.statusLabel}`;
+  }
+
+  if (scoreLabel) {
+    return scoreLabel;
+  }
+
   if (status.eventTime ?? status.statusLabel) {
     return status.eventTime ?? status.statusLabel;
   }
 
   return fallback;
-};
-
-const getLiveBadgeLabel = (status: LiveStatus | undefined): string => {
-  if (!status) {
-    return 'OPEN';
-  }
-
-  if (status.scoreLabel) {
-    return status.scoreLabel;
-  }
-
-  if (status.homeScore !== null && status.awayScore !== null) {
-    return `${status.homeScore}-${status.awayScore}`;
-  }
-
-  return status.statusLabel;
 };
 
 const getLegBadgeClassName = (
@@ -486,6 +484,7 @@ const PortfolioPage = () => {
     Record<string, LiveStatus>
   >({});
   const teamLegLiveStatusesRef = useRef<Record<string, LiveStatus>>({});
+  const [rolloverLegId, setRolloverLegId] = useState<string | null>(null);
   const [sellPosition, setSellPosition] = useState<PaperPosition | null>(null);
   const [sellDetail, setSellDetail] = useState<MarketDetail | null>(null);
   const [sellShares, setSellShares] = useState(0);
@@ -1203,32 +1202,32 @@ const PortfolioPage = () => {
 
                       <div className="mt-3 space-y-2 text-sm">
                         <div className="flex flex-wrap items-center gap-2 text-gray-700">
-                          {position.side !== 'draw' &&
-                          teamBrandingByName[
-                            position.side === 'home'
-                              ? position.homeTeam
-                              : position.awayTeam
-                          ]?.logo ? (
-                            <img
-                              src={
-                                teamBrandingByName[
+                          {position.side !== 'draw' ? (
+                            teamBrandingByName[
+                              position.side === 'home'
+                                ? position.homeTeam
+                                : position.awayTeam
+                            ]?.logo ? (
+                              <img
+                                src={
+                                  teamBrandingByName[
+                                    position.side === 'home'
+                                      ? position.homeTeam
+                                      : position.awayTeam
+                                  ]?.logo
+                                }
+                                alt=""
+                                className="h-6 w-6 object-cover"
+                              />
+                            ) : (
+                              <span>
+                                {countryNameToFlag(
                                   position.side === 'home'
                                     ? position.homeTeam
                                     : position.awayTeam
-                                ]?.logo
-                              }
-                              alt=""
-                              className="h-4 w-4 object-cover"
-                            />
-                          ) : null}
-                          {position.side !== 'draw' ? (
-                            <span>
-                              {countryNameToFlag(
-                                position.side === 'home'
-                                  ? position.homeTeam
-                                  : position.awayTeam
-                              )}
-                            </span>
+                                )}
+                              </span>
+                            )
                           ) : null}
                           <span className="font-semibold text-gray-900">
                             {position.side === 'home'
@@ -1375,7 +1374,7 @@ const PortfolioPage = () => {
             role="dialog"
             aria-modal="true"
             aria-labelledby="create-team-modal-title"
-            className="flex h-[85vh] w-full max-w-lg flex-col rounded-2xl bg-white p-6 shadow-2xl"
+            className="flex max-h-[70vh] w-full max-w-lg flex-col rounded-2xl bg-white p-6 shadow-2xl"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1635,27 +1634,51 @@ const PortfolioPage = () => {
                             </span>
                           </div>
 
-                          <div className="mt-2 flex items-center justify-between gap-2">
+                          <div className="mt-2 flex items-start justify-between gap-2">
                             <p className="font-medium text-gray-900 text-sm">
                               {leg.cardTitle}
                             </p>
-                            <button
-                              type="button"
-                              className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 font-semibold text-[11px] text-violet-700"
-                            >
-                              Rollover
-                            </button>
+                            {rolloverLegId === leg.id ? (
+                              <div className="flex flex-col items-end gap-1.5">
+                                <div className="flex gap-1.5">
+                                  <button
+                                    type="button"
+                                    className="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 font-semibold text-[11px] text-emerald-700"
+                                  >
+                                    Submit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRolloverLegId(null)}
+                                    className="rounded-full border border-gray-300 bg-white px-2.5 py-0.5 font-semibold text-[11px] text-gray-600"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                                <p className="max-w-[180px] text-right text-[10px] text-amber-700 leading-tight">
+                                  WARNING! You are about to close out your leg and roll your profits into the next leg.
+                                </p>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setRolloverLegId(leg.id)}
+                                className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 font-semibold text-[11px] text-violet-700"
+                              >
+                                Rollover
+                              </button>
+                            )}
                           </div>
 
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                             <span className="inline-flex rounded-full border border-green-200 bg-white px-2 py-0.5 font-medium text-green-700">
-                              {getLiveBadgeLabel(liveStatus)}
-                            </span>
-                            <span className="text-gray-600">
                               {formatLiveSummary(
                                 liveStatus,
-                                formatTradeTime(leg.kickoff)
+                                liveStatus?.statusLabel ?? 'OPEN'
                               )}
+                            </span>
+                            <span className="text-gray-600">
+                              {formatTradeTime(leg.kickoff)}
                             </span>
                           </div>
 

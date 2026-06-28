@@ -722,12 +722,12 @@ const DashboardPage = () => {
                     {card.matchup}
                   </h3>
                   <span className="inline-block rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-xs">
-                    {liveStatuses[card.id]?.statusLabel ?? 'OPEN'}
+                    {formatLiveSummary(liveStatuses[card.id], liveStatuses[card.id]?.statusLabel ?? 'OPEN')}
                   </span>
                 </div>
 
                 <div className="mb-4 flex items-center gap-2 text-violet-800/80 text-xs">
-                  {formatLiveSummary(liveStatuses[card.id], card.kickoff)}
+                  {card.kickoff}
                 </div>
 
                 <div className="flex flex-col gap-2">

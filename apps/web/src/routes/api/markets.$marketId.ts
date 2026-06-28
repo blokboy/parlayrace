@@ -87,11 +87,10 @@ const pickMarketForSide = (
 
   if (side === 'home') {
     const homeWinMarket = markets.find((market) => {
-      return (
-        includesNormalized(market.question, homeTeam) &&
-        includesNormalized(market.question, awayTeam) &&
-        includesNormalized(market.question, 'beat')
-      );
+      const q = market.question.toLowerCase();
+      const homeIdx = q.indexOf(homeTeam.toLowerCase());
+      const beatIdx = q.indexOf('beat');
+      return homeIdx >= 0 && beatIdx >= 0 && homeIdx < beatIdx;
     });
     if (homeWinMarket) {
       return homeWinMarket;
@@ -100,11 +99,10 @@ const pickMarketForSide = (
 
   if (side === 'away') {
     const awayWinMarket = markets.find((market) => {
-      return (
-        includesNormalized(market.question, awayTeam) &&
-        includesNormalized(market.question, homeTeam) &&
-        includesNormalized(market.question, 'beat')
-      );
+      const q = market.question.toLowerCase();
+      const awayIdx = q.indexOf(awayTeam.toLowerCase());
+      const beatIdx = q.indexOf('beat');
+      return awayIdx >= 0 && beatIdx >= 0 && awayIdx < beatIdx;
     });
     if (awayWinMarket) {
       return awayWinMarket;
