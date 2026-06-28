@@ -173,10 +173,15 @@ const inWindow = (isoDate: string, from: Date, to: Date) => {
   return value >= from && value <= to;
 };
 
-const isFifaEvent = (event: PolymarketEvent) => {
+const isWorldCupEvent = (event: PolymarketEvent) => {
   const series = (event.seriesSlug ?? '').toLowerCase();
   const slug = (event.slug ?? '').toLowerCase();
-  return series === 'soccer-fifwc' || slug.startsWith('fifwc-');
+  return (
+    series.includes('fifwc') ||
+    series.includes('world-cup') ||
+    slug.startsWith('fifwc-') ||
+    slug.includes('world-cup')
+  );
 };
 
 // ─── market item builder ─────────────────────────────────────────────────────
@@ -243,24 +248,39 @@ export const Route = createFileRoute('/api/markets')({
           return Response.json({ markets: [] as MarketItem[] });
         }
 
-        const response = await fetch(
-          'https://gamma-api.polymarket.com/events?limit=200&active=true&closed=false&tag_slug=soccer'
+        // Fetch both tags in parallel — World Cup fixtures live under
+        // "world-cup" on Polymarket, but some may also appear under "soccer".
+        const [wcRes, soccerRes] = await Promise.all([
+          fetch(
+            'https://gamma-api.polymarket.com/events?limit=200&active=true&closed=false&tag_slug=world-cup'
+          ),
+          fetch(
+            'https://gamma-api.polymarket.com/events?limit=200&active=true&closed=false&tag_slug=soccer'
+          ),
+        ]);
+
+        const wcEvents: PolymarketEvent[] = wcRes.ok
+          ? ((await wcRes.json()) as PolymarketEvent[])
+          : [];
+
+        const soccerEvents: PolymarketEvent[] = soccerRes.ok
+          ? ((await soccerRes.json()) as PolymarketEvent[])
+          : [];
+
+        // Events from the world-cup tag are all WC fixtures; events from the
+        // soccer tag need the slug/series check to exclude unrelated markets.
+        const wcIds = new Set(wcEvents.map((e) => String(e.id)));
+        const filteredSoccer = soccerEvents.filter(
+          (e) => !wcIds.has(String(e.id)) && isWorldCupEvent(e)
         );
 
-        if (!response.ok) {
-          return Response.json(
-            { markets: [] as MarketItem[] },
-            { status: 200 }
-          );
-        }
+        const allEvents = [...wcEvents, ...filteredSoccer];
 
-        const events = (await response.json()) as PolymarketEvent[];
         const defaultWindow = getWindow();
         const from = queryFrom ?? defaultWindow.from;
         const to = queryTo ?? defaultWindow.to;
 
-        const markets = events
-          .filter((event) => isFifaEvent(event))
+        const markets = allEvents
           .filter((event) => inWindow(event.endDate, from, to))
           .map(toMarketItem)
           .filter((market): market is MarketItem => market !== null)
