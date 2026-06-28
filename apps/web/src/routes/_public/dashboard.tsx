@@ -63,9 +63,17 @@ type SelectedTrade = {
   kickoff: string;
   homeTeam: string;
   awayTeam: string;
+  category: 'fifa-games' | 'mlb-games';
   side: SelectionSide;
   selectionLabel: string;
 };
+
+type LeagueCategory = 'fifa-games' | 'mlb-games';
+
+const LEAGUE_META: ReadonlyArray<{ category: LeagueCategory; label: string }> = [
+  { category: 'fifa-games', label: 'FIFA' },
+  { category: 'mlb-games', label: 'MLB' },
+];
 
 type MarketDetail = {
   marketId: string;
@@ -544,6 +552,29 @@ const DashboardPage = () => {
   const [buying, setBuying] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userTimeZone, setUserTimeZone] = useState('UTC');
+  const [activeLeagues, setActiveLeagues] = useState<Set<LeagueCategory>>(
+    new Set()
+  );
+
+  // An empty set means "ALL" (no filter applied).
+  const isLeagueActive = (category: LeagueCategory) =>
+    activeLeagues.size === 0 || activeLeagues.has(category);
+
+  const toggleLeague = (category: LeagueCategory) => {
+    setActiveLeagues((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      // Selecting every league is equivalent to "ALL" — reset to empty.
+      if (next.size === LEAGUE_META.length) {
+        next.clear();
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     const detectedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -624,6 +655,18 @@ const DashboardPage = () => {
       .sort((a, b) => a.kickoffIso.localeCompare(b.kickoffIso));
   }, [markets, teamBrands, userTimeZone]);
 
+  const leagueGroups = useMemo(
+    () =>
+      LEAGUE_META.filter(({ category }) => isLeagueActive(category))
+        .map(({ category, label }) => ({
+          category,
+          label,
+          cards: marketCards.filter((card) => card.category === category),
+        }))
+        .filter((group) => group.cards.length > 0),
+    [marketCards, activeLeagues]
+  );
+
   useEffect(() => {
     liveStatusesRef.current = liveStatuses;
   }, [liveStatuses]);
@@ -652,6 +695,7 @@ const DashboardPage = () => {
           kickoff: card.kickoffIso,
           homeTeam: card.home.name,
           awayTeam: card.away.name,
+          category: card.category,
         };
         const [homeDetail, drawDetail, awayDetail] = await Promise.all([
           fetchMarketDetail({ ...base, side: 'home', selectionLabel: card.home.name }),
@@ -798,6 +842,9 @@ const DashboardPage = () => {
     };
   }, [selectedTrade]);
 
+  // MLB markets are two-outcome (no draw), so picking a team is an implicit
+  // "YES" on that team — there's no YES/NO choice to surface.
+  const isMlbTrade = selectedTrade?.category === 'mlb-games';
   const selectedPrice =
     pickSide === 'YES'
       ? (marketDetail?.yesPrice ?? 0)
@@ -836,6 +883,7 @@ const DashboardPage = () => {
       kickoff: card.kickoffIso,
       homeTeam: card.home.name,
       awayTeam: card.away.name,
+      category: card.category,
       side,
       selectionLabel,
     });
@@ -903,8 +951,38 @@ const DashboardPage = () => {
       <div className="landing-arcade__glow" />
       <div className="landing-arcade__scanlines" />
       <div className="dashboard-arcade__content relative z-10 mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between">
           <h1 className="font-bold text-3xl text-gray-900">Markets</h1>
+        </div>
+
+        <div className="mb-8 flex flex-wrap items-center gap-2">
+          {(
+            [
+              { key: 'all', label: 'ALL', active: activeLeagues.size === 0 },
+              ...LEAGUE_META.map(({ category, label }) => ({
+                key: category,
+                label,
+                active: activeLeagues.has(category),
+              })),
+            ] as const
+          ).map((badge) => (
+            <button
+              key={badge.key}
+              type="button"
+              onClick={() =>
+                badge.key === 'all'
+                  ? setActiveLeagues(new Set())
+                  : toggleLeague(badge.key as LeagueCategory)
+              }
+              className={`rounded-full border px-3 py-1 font-semibold text-xs uppercase tracking-wide transition ${
+                badge.active
+                  ? 'border-violet-500 bg-violet-600 text-white'
+                  : 'border-violet-200 bg-white text-violet-700 hover:border-violet-300 hover:bg-violet-50'
+              }`}
+            >
+              {badge.label}
+            </button>
+          ))}
         </div>
 
         {loading ? (
@@ -924,46 +1002,55 @@ const DashboardPage = () => {
               </div>
             ))}
           </div>
-        ) : marketCards.length > 0 ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {marketCards.map((card) => (
-              <div
-                key={card.id}
-                className="landing-panel p-6 transition-shadow hover:shadow-lg"
-              >
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <h3 className="font-semibold text-lg text-violet-950">
-                    {card.matchup}
-                  </h3>
-                  <StatusBadge
-                    card={card}
-                    status={liveStatuses[card.id]}
-                    resolvedPrices={resolvedPrices}
-                  />
-                </div>
+        ) : leagueGroups.length > 0 ? (
+          <div className="space-y-10">
+            {leagueGroups.map((group) => (
+              <section key={group.category}>
+                <h2 className="mb-4 font-bold text-violet-900 text-xl tracking-tight">
+                  {group.label}
+                </h2>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {group.cards.map((card) => (
+                    <div
+                      key={card.id}
+                      className="landing-panel p-6 transition-shadow hover:shadow-lg"
+                    >
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <h3 className="font-semibold text-lg text-violet-950">
+                          {card.matchup}
+                        </h3>
+                        <StatusBadge
+                          card={card}
+                          status={liveStatuses[card.id]}
+                          resolvedPrices={resolvedPrices}
+                        />
+                      </div>
 
-                <div className="mb-4 flex items-center gap-2 text-violet-800/80 text-xs">
-                  {card.kickoff}
-                </div>
+                      <div className="mb-4 flex items-center gap-2 text-violet-800/80 text-xs">
+                        {card.kickoff}
+                      </div>
 
-                <div className="flex flex-col gap-2">
-                  <FlagButton
-                    team={card.home}
-                    onClick={() => openTradeModal(card, 'home')}
-                  />
-                  {card.drawLeg ? (
-                    <FlagButton
-                      team={card.home}
-                      draw={true}
-                      onClick={() => openTradeModal(card, 'draw')}
-                    />
-                  ) : null}
-                  <FlagButton
-                    team={card.away}
-                    onClick={() => openTradeModal(card, 'away')}
-                  />
+                      <div className="flex flex-col gap-2">
+                        <FlagButton
+                          team={card.home}
+                          onClick={() => openTradeModal(card, 'home')}
+                        />
+                        {card.drawLeg ? (
+                          <FlagButton
+                            team={card.home}
+                            draw={true}
+                            onClick={() => openTradeModal(card, 'draw')}
+                          />
+                        ) : null}
+                        <FlagButton
+                          team={card.away}
+                          onClick={() => openTradeModal(card, 'away')}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              </section>
             ))}
           </div>
         ) : (
@@ -995,9 +1082,9 @@ const DashboardPage = () => {
             </p>
             <DialogClose
               aria-label="Close trade modal"
-              className="absolute top-4 right-4 rounded-sm p-1 text-violet-700 transition hover:bg-violet-100"
+              className="absolute top-4 right-4 rounded-full border border-violet-200 bg-white px-3 py-1 font-semibold text-violet-700 text-xs transition hover:border-violet-300 hover:bg-violet-50"
             >
-              x
+              Close
             </DialogClose>
           </DialogHeader>
 
@@ -1054,29 +1141,37 @@ const DashboardPage = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                <p className="text-sm text-violet-900">Pick Side</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPickSide('YES')}
-                    className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
-                  >
-                    YES{' '}
-                    {marketDetail ? `$${marketDetail.yesPrice.toFixed(2)}` : '--'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPickSide('NO')}
-                    className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
-                  >
-                    NO{' '}
-                    {marketDetail ? `$${marketDetail.noPrice.toFixed(2)}` : '--'}
-                  </button>
-                </div>
+                {isMlbTrade ? null : (
+                  <>
+                    <p className="text-sm text-violet-900">Pick Side</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPickSide('YES')}
+                        className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
+                      >
+                        YES{' '}
+                        {marketDetail
+                          ? `$${marketDetail.yesPrice.toFixed(2)}`
+                          : '--'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPickSide('NO')}
+                        className={`rounded-md border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-violet-200 bg-white text-violet-900 hover:bg-violet-50'}`}
+                      >
+                        NO{' '}
+                        {marketDetail
+                          ? `$${marketDetail.noPrice.toFixed(2)}`
+                          : '--'}
+                      </button>
+                    </div>
+                  </>
+                )}
 
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-violet-900">
-                    Expected Max Payout ({pickSide})
+                    Expected Max Payout{isMlbTrade ? '' : ` (${pickSide})`}
                   </p>
                   <p className="font-semibold text-sm text-violet-950">
                     ${expectedMaxPayout.toFixed(2)}
@@ -1089,7 +1184,11 @@ const DashboardPage = () => {
                   onClick={() => void handleConfirmBuy()}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <span>Confirm BUY {pickSide}</span>
+                  <span>
+                    {isMlbTrade
+                      ? `Confirm ${selectedTrade?.selectionLabel ?? ''}`
+                      : `Confirm BUY ${pickSide}`}
+                  </span>
                   <span>${selectedPrice.toFixed(2)}</span>
                 </button>
               </div>
