@@ -8,12 +8,6 @@ type PolymarketMarket = {
   updatedAt?: string;
 };
 
-type PolymarketEvent = {
-  id: string | number;
-  title: string;
-  markets?: PolymarketMarket[];
-};
-
 type MarketDetailPayload = {
   marketId: string;
   question: string;
@@ -63,8 +57,52 @@ const toPricePair = (
   };
 };
 
-const includesNormalized = (source: string, query: string) =>
-  source.toLowerCase().includes(query.toLowerCase());
+// WIN_KEYWORDS are searched left-to-right; whichever team name appears
+// last before the keyword is the predicted winner in that market.
+const WIN_KEYWORDS = ['to win', 'beat', 'wins', 'will win', 'defeat'];
+
+const classifyMarket = (
+  question: string,
+  homeTeam: string,
+  awayTeam: string
+): 'home' | 'away' | 'draw' | null => {
+  const q = question.toLowerCase();
+  const home = homeTeam.toLowerCase();
+  const away = awayTeam.toLowerCase();
+
+  if (q.includes('draw')) {
+    return 'draw';
+  }
+
+  for (const keyword of WIN_KEYWORDS) {
+    const keywordIdx = q.indexOf(keyword);
+    if (keywordIdx < 0) {
+      continue;
+    }
+
+    // Find the rightmost occurrence of each team name BEFORE the keyword —
+    // that team is the subject of the win clause.
+    const homeIdx = q.lastIndexOf(home, keywordIdx - 1);
+    const awayIdx = q.lastIndexOf(away, keywordIdx - 1);
+
+    if (homeIdx >= 0 && (awayIdx < 0 || homeIdx > awayIdx)) {
+      return 'home';
+    }
+    if (awayIdx >= 0 && (homeIdx < 0 || awayIdx > homeIdx)) {
+      return 'away';
+    }
+  }
+
+  // Fallback: whichever team appears first in the question is the winner
+  // (handles formats like "[Team A] vs [Team B]" where Team A is the subject).
+  const firstHome = q.indexOf(home);
+  const firstAway = q.indexOf(away);
+  if (firstHome >= 0 && firstAway >= 0) {
+    return firstHome < firstAway ? 'home' : 'away';
+  }
+
+  return null;
+};
 
 const pickMarketForSide = (
   markets: PolymarketMarket[],
@@ -76,40 +114,42 @@ const pickMarketForSide = (
     return null;
   }
 
-  if (side === 'draw') {
-    const drawMarket = markets.find((market) =>
-      includesNormalized(market.question, 'draw')
-    );
-    if (drawMarket) {
-      return drawMarket;
+  const target = side as 'home' | 'away' | 'draw';
+
+  const match = markets.find(
+    (market) =>
+      classifyMarket(market.question, homeTeam, awayTeam) === target
+  );
+
+  return match ?? markets[0] ?? null;
+};
+
+const fetchMarketsForEvent = async (
+  eventId: string
+): Promise<PolymarketMarket[]> => {
+  // Prefer the /markets endpoint — it reliably includes outcomePrices.
+  const marketsRes = await fetch(
+    `https://gamma-api.polymarket.com/markets?event_id=${encodeURIComponent(eventId)}&limit=20`
+  );
+
+  if (marketsRes.ok) {
+    const data = (await marketsRes.json()) as PolymarketMarket[];
+    if (Array.isArray(data) && data.length > 0) {
+      return data;
     }
   }
 
-  if (side === 'home') {
-    const homeWinMarket = markets.find((market) => {
-      const q = market.question.toLowerCase();
-      const homeIdx = q.indexOf(homeTeam.toLowerCase());
-      const beatIdx = q.indexOf('beat');
-      return homeIdx >= 0 && beatIdx >= 0 && homeIdx < beatIdx;
-    });
-    if (homeWinMarket) {
-      return homeWinMarket;
-    }
+  // Fallback: fetch the event and extract embedded markets.
+  const eventRes = await fetch(
+    `https://gamma-api.polymarket.com/events/${encodeURIComponent(eventId)}`
+  );
+
+  if (!eventRes.ok) {
+    return [];
   }
 
-  if (side === 'away') {
-    const awayWinMarket = markets.find((market) => {
-      const q = market.question.toLowerCase();
-      const awayIdx = q.indexOf(awayTeam.toLowerCase());
-      const beatIdx = q.indexOf('beat');
-      return awayIdx >= 0 && beatIdx >= 0 && awayIdx < beatIdx;
-    });
-    if (awayWinMarket) {
-      return awayWinMarket;
-    }
-  }
-
-  return markets[0] ?? null;
+  const event = (await eventRes.json()) as { markets?: PolymarketMarket[] };
+  return event.markets ?? [];
 };
 
 export const Route = createFileRoute('/api/markets/$marketId')({
@@ -122,11 +162,9 @@ export const Route = createFileRoute('/api/markets/$marketId')({
         const homeTeam = url.searchParams.get('homeTeam') ?? '';
         const awayTeam = url.searchParams.get('awayTeam') ?? '';
 
-        const eventResponse = await fetch(
-          `https://gamma-api.polymarket.com/events/${encodeURIComponent(marketId)}`
-        );
+        const markets = await fetchMarketsForEvent(marketId);
 
-        if (!eventResponse.ok) {
+        if (markets.length === 0) {
           return Response.json(
             {
               marketId,
@@ -139,9 +177,8 @@ export const Route = createFileRoute('/api/markets/$marketId')({
           );
         }
 
-        const event = (await eventResponse.json()) as PolymarketEvent;
         const selectedMarket = pickMarketForSide(
-          event.markets ?? [],
+          markets,
           side,
           homeTeam,
           awayTeam
@@ -151,7 +188,7 @@ export const Route = createFileRoute('/api/markets/$marketId')({
           return Response.json(
             {
               marketId,
-              question: event.title,
+              question: 'Price unavailable',
               yesPrice: 0.5,
               noPrice: 0.5,
               updatedAt: null,
