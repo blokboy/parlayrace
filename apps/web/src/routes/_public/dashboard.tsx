@@ -722,9 +722,10 @@ const DashboardPage = () => {
 
     const pollIfNeeded = async () => {
       const now = Date.now();
+      const FIVE_MIN_MS = 5 * 60 * 1000;
       const activeCards = marketCards.filter((card) => {
         const kickoffTime = new Date(card.kickoffIso).getTime();
-        if (Number.isNaN(kickoffTime) || kickoffTime > now) {
+        if (Number.isNaN(kickoffTime) || kickoffTime - FIVE_MIN_MS > now) {
           return false;
         }
 
@@ -742,7 +743,7 @@ const DashboardPage = () => {
     void pollIfNeeded();
     const interval = setInterval(() => {
       void pollIfNeeded();
-    }, 60000);
+    }, 30000);
 
     return () => {
       cancelled = true;

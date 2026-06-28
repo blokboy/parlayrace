@@ -837,6 +837,31 @@ const PortfolioPage = () => {
     };
   }, [selectedParlayTeam]);
 
+  const hasUnresolvedLegs = useMemo(
+    () =>
+      parlayTeams.some((team) =>
+        team.committedLegs.some((leg) => leg.result === 'PENDING')
+      ),
+    [parlayTeams]
+  );
+
+  const polyPollRateMs = hasUnresolvedLegs ? 5 * 60 * 1000 : 30 * 60 * 1000;
+
+  useEffect(() => {
+    if (!username) return;
+
+    const id = setInterval(async () => {
+      await fetch('/api/sync/polymarket', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      });
+      const teams = await fetchParlayTeams();
+      setParlayTeams(teams);
+    }, polyPollRateMs);
+
+    return () => clearInterval(id);
+  }, [username, polyPollRateMs]);
+
   useEffect(() => {
     if (!selectedParlayTeam || selectedParlayTeam.committedLegs.length === 0) {
       setTeamLegMetricsById({});
