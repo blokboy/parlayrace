@@ -686,24 +686,51 @@ const syncParlayStates = async (teamIds: string[]) => {
 
     // Per-leg working state. Prefer a persisted result; otherwise resolve from
     // the live status. resolvedAt drives the rollover chronology.
-    const legState = parlayShares.map((share) => {
-      const position = positionById.get(share.positionId) ?? null;
-      const persisted =
-        share.result === 'WON' ||
-        share.result === 'LOST' ||
-        share.result === 'ROLLED_OVER'
-          ? (share.result as LegResolution)
-          : null;
-      const result =
-        persisted ?? resolveLegResult(position, statuses[share.id]);
-      return {
-        share,
-        position,
-        result,
-        persisted: persisted !== null,
-        resolvedAt: share.resolvedAt ? new Date(share.resolvedAt) : null,
-      };
-    });
+    const legState = await Promise.all(
+      parlayShares.map(async (share) => {
+        const position = positionById.get(share.positionId) ?? null;
+        const persisted =
+          share.result === 'WON' ||
+          share.result === 'LOST' ||
+          share.result === 'ROLLED_OVER'
+            ? (share.result as LegResolution)
+            : null;
+
+        let result =
+          persisted ?? resolveLegResult(position, statuses[share.id]);
+
+        // When the game is final but live scores can't name a winner (e.g.
+        // api-football couldn't match the fixture), fall back to Polymarket's
+        // resolved price: a settled market pays the bought side ~1.0 (won) or
+        // ~0.0 (lost). Gated on isFinal so a transient mid-match price can't
+        // settle a leg early.
+        let sidePrice: number | null = null;
+        if (
+          !persisted &&
+          result === 'PENDING' &&
+          position &&
+          statuses[share.id]?.isFinal
+        ) {
+          sidePrice = await legPriceForPosition(share.marketId, position);
+          if (sidePrice !== null) {
+            if (sidePrice >= 0.99) {
+              result = 'WON';
+            } else if (sidePrice <= 0.01) {
+              result = 'LOST';
+            }
+          }
+        }
+
+        return {
+          share,
+          position,
+          result,
+          persisted: persisted !== null,
+          resolvedAt: share.resolvedAt ? new Date(share.resolvedAt) : null,
+          sidePrice,
+        };
+      })
+    );
 
     const now = new Date();
 
@@ -714,10 +741,9 @@ const syncParlayStates = async (teamIds: string[]) => {
         continue;
       }
 
-      const settlePrice = await legPriceForPosition(
-        leg.share.marketId,
-        leg.position
-      );
+      const settlePrice =
+        leg.sidePrice ??
+        (await legPriceForPosition(leg.share.marketId, leg.position));
 
       leg.resolvedAt = now;
       await db
