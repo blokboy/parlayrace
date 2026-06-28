@@ -1,5 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router';
 
+type PolymarketMarket = {
+  id: string | number;
+  question: string;
+  outcomes?: string;
+  outcomePrices?: string;
+  updatedAt?: string;
+};
+
 type PolymarketTeam = {
   name: string;
   logo: string;
@@ -15,6 +23,7 @@ type PolymarketEvent = {
   slug?: string;
   seriesSlug?: string;
   teams: PolymarketTeam[] | null;
+  markets?: PolymarketMarket[];
   active?: boolean;
   closed?: boolean;
 };
@@ -23,6 +32,8 @@ type MarketLeg = {
   id: string;
   side: 'home' | 'draw' | 'away';
   label: string;
+  yesPrice: number;
+  noPrice: number;
 };
 
 type MarketItem = {
@@ -35,6 +46,93 @@ type MarketItem = {
   awayTeam: string;
   legs: [MarketLeg, MarketLeg, MarketLeg];
 };
+
+// ─── price extraction ───────────────────────────────────────────────────────
+
+const parseJsonArray = (value: string | undefined): string[] => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as string[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const roundToCents = (n: number) => Math.round(n * 100) / 100;
+
+const extractPrices = (
+  market: PolymarketMarket
+): { yesPrice: number; noPrice: number } => {
+  const outcomes = parseJsonArray(market.outcomes);
+  const prices = parseJsonArray(market.outcomePrices).map(Number);
+
+  if (outcomes.length === 0 || prices.length === 0) {
+    return { yesPrice: 0.5, noPrice: 0.5 };
+  }
+
+  const yesIdx = outcomes.findIndex((o) => o.toLowerCase() === 'yes');
+  const yesPriceRaw = yesIdx >= 0 ? prices[yesIdx] : prices[0];
+  const yesPrice = Number.isFinite(yesPriceRaw) ? yesPriceRaw : 0.5;
+
+  return {
+    yesPrice: roundToCents(yesPrice),
+    noPrice: roundToCents(Math.max(0, Math.min(1, 1 - yesPrice))),
+  };
+};
+
+// ─── market classification ───────────────────────────────────────────────────
+// Determines which side (home win / draw / away win) a Polymarket market
+// represents by inspecting its question text.
+
+const WIN_KEYWORDS = ['to win', 'beat', 'wins', 'will win', 'defeat'];
+
+const classifyMarket = (
+  question: string,
+  homeTeam: string,
+  awayTeam: string
+): 'home' | 'away' | 'draw' | null => {
+  const q = question.toLowerCase();
+  const home = homeTeam.toLowerCase();
+  const away = awayTeam.toLowerCase();
+
+  if (q.includes('draw')) return 'draw';
+
+  for (const kw of WIN_KEYWORDS) {
+    const kwIdx = q.indexOf(kw);
+    if (kwIdx < 0) continue;
+
+    // The team whose name appears rightmost BEFORE the win keyword is the winner.
+    const homeIdx = q.lastIndexOf(home, kwIdx - 1);
+    const awayIdx = q.lastIndexOf(away, kwIdx - 1);
+
+    if (homeIdx >= 0 && (awayIdx < 0 || homeIdx > awayIdx)) return 'home';
+    if (awayIdx >= 0 && (homeIdx < 0 || awayIdx > homeIdx)) return 'away';
+  }
+
+  // Fallback: whichever team is mentioned first is the predicted winner.
+  const firstHome = q.indexOf(home);
+  const firstAway = q.indexOf(away);
+  if (firstHome >= 0 && firstAway >= 0) {
+    return firstHome < firstAway ? 'home' : 'away';
+  }
+
+  return null;
+};
+
+const findLegPrices = (
+  markets: PolymarketMarket[],
+  side: 'home' | 'draw' | 'away',
+  homeTeam: string,
+  awayTeam: string
+): { yesPrice: number; noPrice: number } => {
+  const match = markets.find(
+    (m) => classifyMarket(m.question, homeTeam, awayTeam) === side
+  );
+  return match ? extractPrices(match) : { yesPrice: 0.5, noPrice: 0.5 };
+};
+
+// ─── date utilities ──────────────────────────────────────────────────────────
 
 const startOfDayUtc = (value: Date) =>
   new Date(
@@ -64,18 +162,14 @@ const getWindow = () => {
 };
 
 const parseDateParam = (value: string | null): Date | null => {
-  if (!value) {
-    return null;
-  }
+  if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
 const inWindow = (isoDate: string, from: Date, to: Date) => {
   const value = new Date(isoDate);
-  if (Number.isNaN(value.getTime())) {
-    return false;
-  }
+  if (Number.isNaN(value.getTime())) return false;
   return value >= from && value <= to;
 };
 
@@ -85,10 +179,10 @@ const isFifaEvent = (event: PolymarketEvent) => {
   return series === 'soccer-fifwc' || slug.startsWith('fifwc-');
 };
 
+// ─── market item builder ─────────────────────────────────────────────────────
+
 const toMarketItem = (event: PolymarketEvent): MarketItem | null => {
-  if (!event.teams || event.teams.length < 2) {
-    return null;
-  }
+  if (!event.teams || event.teams.length < 2) return null;
 
   const home =
     event.teams.find((team) => team.ordering === 'home') ?? event.teams[0];
@@ -97,11 +191,10 @@ const toMarketItem = (event: PolymarketEvent): MarketItem | null => {
     event.teams.find((team) => team.name !== home.name) ??
     event.teams[1];
 
-  if (!home || !away) {
-    return null;
-  }
+  if (!home || !away) return null;
 
   const eventId = String(event.id);
+  const markets = event.markets ?? [];
 
   return {
     id: eventId,
@@ -112,12 +205,29 @@ const toMarketItem = (event: PolymarketEvent): MarketItem | null => {
     homeTeam: home.name,
     awayTeam: away.name,
     legs: [
-      { id: `${eventId}:home`, side: 'home', label: home.name },
-      { id: `${eventId}:draw`, side: 'draw', label: 'Draw' },
-      { id: `${eventId}:away`, side: 'away', label: away.name },
+      {
+        id: `${eventId}:home`,
+        side: 'home',
+        label: home.name,
+        ...findLegPrices(markets, 'home', home.name, away.name),
+      },
+      {
+        id: `${eventId}:draw`,
+        side: 'draw',
+        label: 'Draw',
+        ...findLegPrices(markets, 'draw', home.name, away.name),
+      },
+      {
+        id: `${eventId}:away`,
+        side: 'away',
+        label: away.name,
+        ...findLegPrices(markets, 'away', home.name, away.name),
+      },
     ],
   };
 };
+
+// ─── route ───────────────────────────────────────────────────────────────────
 
 export const Route = createFileRoute('/api/markets')({
   server: {

@@ -13,6 +13,8 @@ type MarketLeg = {
   id: string;
   side: 'home' | 'draw' | 'away';
   label: string;
+  yesPrice: number;
+  noPrice: number;
 };
 
 type MarketItem = {
@@ -45,7 +47,9 @@ type MarketCard = {
   kickoff: string;
   home: { name: string; logo: string; color: string | null };
   away: { name: string; logo: string; color: string | null };
+  homeLeg: MarketLeg;
   drawLeg: MarketLeg;
+  awayLeg: MarketLeg;
 };
 
 type SelectionSide = 'home' | 'draw' | 'away';
@@ -280,7 +284,9 @@ const toMarketCard = (
       logo: awayBrand?.logo ?? '',
       color: awayBrand?.color ?? null,
     },
+    homeLeg,
     drawLeg,
+    awayLeg,
   };
 };
 
@@ -433,7 +439,7 @@ const DashboardPage = () => {
   const [stake, setStake] = useState(25);
   const [pickSide, setPickSide] = useState<'YES' | 'NO'>('YES');
   const [availableBalance, setAvailableBalance] = useState(1000);
-  const [loadingDetail, setLoadingDetail] = useState(false);
+
   const [buying, setBuying] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userTimeZone, setUserTimeZone] = useState('UTC');
@@ -576,11 +582,9 @@ const DashboardPage = () => {
     let cancelled = false;
 
     const loadDetail = async () => {
-      setLoadingDetail(true);
       const detail = await fetchMarketDetail(selectedTrade);
-      if (!cancelled) {
+      if (!cancelled && detail) {
         setMarketDetail(detail);
-        setLoadingDetail(false);
       }
     };
 
@@ -629,6 +633,19 @@ const DashboardPage = () => {
         : side === 'away'
           ? card.away.name
           : 'Draw';
+
+    const leg =
+      side === 'home' ? card.homeLeg : side === 'away' ? card.awayLeg : card.drawLeg;
+
+    // Pre-populate immediately from the embedded leg prices so the modal
+    // opens with real prices instead of showing a loading skeleton.
+    setMarketDetail({
+      marketId: leg.id,
+      question: selectionLabel,
+      yesPrice: leg.yesPrice,
+      noPrice: leg.noPrice,
+      updatedAt: null,
+    });
 
     setSelectedTrade({
       marketId: card.id,
@@ -839,7 +856,7 @@ const DashboardPage = () => {
               Available balance: ${availableBalance.toFixed(2)}
             </p>
 
-            {loadingDetail ? (
+            {!marketDetail ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <Skeleton className="h-10 w-full rounded-md bg-violet-100" />
