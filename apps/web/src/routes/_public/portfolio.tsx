@@ -294,6 +294,43 @@ const LegOutcomeBadge = ({
   );
 };
 
+// A parlay drops into history once it's settled or its last leg kicked off
+// more than this long ago.
+const PARLAY_HISTORY_CUTOFF_MS = 12 * 60 * 60 * 1000;
+
+const parlayFirstLegStarted = (team: ParlayTeam): boolean => {
+  if (team.committedLegs.length === 0) {
+    return false;
+  }
+
+  const earliestKickoffMs = team.committedLegs.reduce((min, leg) => {
+    const ms = new Date(leg.kickoff).getTime();
+    return Number.isFinite(ms) ? Math.min(min, ms) : min;
+  }, Number.POSITIVE_INFINITY);
+
+  return Number.isFinite(earliestKickoffMs) && earliestKickoffMs <= Date.now();
+};
+
+const isParlayInHistory = (team: ParlayTeam): boolean => {
+  if (team.status === 'WON' || team.status === 'LOST') {
+    return true;
+  }
+
+  if (team.committedLegs.length === 0) {
+    return false;
+  }
+
+  const latestKickoffMs = team.committedLegs.reduce((max, leg) => {
+    const ms = new Date(leg.kickoff).getTime();
+    return Number.isFinite(ms) ? Math.max(max, ms) : max;
+  }, Number.NEGATIVE_INFINITY);
+
+  return (
+    Number.isFinite(latestKickoffMs) &&
+    latestKickoffMs < Date.now() - PARLAY_HISTORY_CUTOFF_MS
+  );
+};
+
 const formatLiveSummary = (
   status: LiveStatus | undefined,
   fallback: string
@@ -624,6 +661,7 @@ const PortfolioPage = () => {
   );
   const [parlayTeams, setParlayTeams] = useState<ParlayTeam[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showParlayHistory, setShowParlayHistory] = useState(false);
   const [teamModalOpen, setTeamModalOpen] = useState(false);
   const [teamName, setTeamName] = useState('');
   const [memberQuery, setMemberQuery] = useState('');
@@ -1167,6 +1205,51 @@ const PortfolioPage = () => {
     setSharesToCommit(0);
   };
 
+  const activeParlayTeams = parlayTeams.filter(
+    (team) => !isParlayInHistory(team)
+  );
+  const historyParlayTeams = parlayTeams.filter((team) =>
+    isParlayInHistory(team)
+  );
+
+  const renderParlayTeamCard = (team: ParlayTeam) => (
+    <button
+      key={team.id}
+      type="button"
+      onClick={() => openParlayTeamModal(team)}
+      className="rounded-2xl border border-gray-200 bg-white p-4 text-left transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+    >
+      {parlayFirstLegStarted(team) ? (
+        <span className="mb-1 inline-flex rounded-full border border-green-200 bg-green-50 px-2 py-0.5 font-semibold text-[10px] text-green-700 uppercase tracking-wide">
+          Active
+        </span>
+      ) : null}
+      <h3 className="font-semibold text-base text-gray-900">{team.name}</h3>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="inline-flex rounded-full border border-amber-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-amber-800">
+          Stake ${(teamMetricsById[team.id]?.totalStaked ?? 0).toFixed(2)}
+        </span>
+        <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-emerald-800">
+          Potential Payout $
+          {(teamMetricsById[team.id]?.potentialPayout ?? 0).toFixed(2)}
+        </span>
+      </div>
+      <p className="mt-1 text-gray-500 text-sm">
+        {team.members.length} member{team.members.length === 1 ? '' : 's'}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {team.members.slice(0, 3).map((member) => (
+          <span
+            key={`${team.id}-${member.id}`}
+            className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-gray-700 text-xs"
+          >
+            {member.username}
+          </span>
+        ))}
+      </div>
+    </button>
+  );
+
   const handleCommitShareToTeam = async () => {
     if (
       !selectedParlayTeam ||
@@ -1602,48 +1685,45 @@ const PortfolioPage = () => {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {parlayTeams.map((team) => (
-                      <button
-                        key={team.id}
-                        type="button"
-                        onClick={() => openParlayTeamModal(team)}
-                        className="rounded-2xl border border-gray-200 bg-white p-4 text-left transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                      >
-                        <h3 className="font-semibold text-base text-gray-900">
-                          {team.name}
-                        </h3>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span className="inline-flex rounded-full border border-amber-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-amber-800">
-                            Stake $
-                            {(
-                              teamMetricsById[team.id]?.totalStaked ?? 0
-                            ).toFixed(2)}
+                  <>
+                    {activeParlayTeams.length > 0 ? (
+                      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {activeParlayTeams.map((team) =>
+                          renderParlayTeamCard(team)
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-gray-200 bg-white p-6 text-gray-500 text-sm">
+                        No active parlay teams right now.
+                      </div>
+                    )}
+
+                    {historyParlayTeams.length > 0 ? (
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setShowParlayHistory((value) => !value)
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-3 py-1.5 font-semibold text-sm text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
+                        >
+                          {showParlayHistory ? 'Hide' : 'Show'} history (
+                          {historyParlayTeams.length})
+                          <span aria-hidden="true">
+                            {showParlayHistory ? '▲' : '▼'}
                           </span>
-                          <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2.5 py-1 font-semibold text-[11px] text-emerald-800">
-                            Potential Payout $
-                            {(
-                              teamMetricsById[team.id]?.potentialPayout ?? 0
-                            ).toFixed(2)}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-gray-500 text-sm">
-                          {team.members.length} member
-                          {team.members.length === 1 ? '' : 's'}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {team.members.slice(0, 3).map((member) => (
-                            <span
-                              key={`${team.id}-${member.id}`}
-                              className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-gray-700 text-xs"
-                            >
-                              {member.username}
-                            </span>
-                          ))}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                        </button>
+
+                        {showParlayHistory ? (
+                          <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                            {historyParlayTeams.map((team) =>
+                              renderParlayTeamCard(team)
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </>
                 )}
               </div>
             </>
@@ -1678,9 +1758,9 @@ const PortfolioPage = () => {
                 type="button"
                 onClick={() => setTeamModalOpen(false)}
                 disabled={creatingTeam}
-                className="rounded-md px-2 py-1 font-semibold text-gray-500 text-sm transition hover:bg-gray-100 disabled:opacity-60"
+                className="rounded-full border border-violet-200 bg-white px-3 py-1 font-semibold text-violet-700 text-xs transition hover:border-violet-300 hover:bg-violet-50 disabled:opacity-60"
               >
-                X
+                Close
               </button>
             </div>
 
@@ -1730,15 +1810,15 @@ const PortfolioPage = () => {
                     {selectedMembers.map((member) => (
                       <span
                         key={member.id}
-                        className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white px-2.5 py-1 text-blue-700 text-xs"
+                        className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 font-semibold text-violet-700 text-xs"
                       >
                         {member.username}
                         <button
                           type="button"
                           onClick={() => removeMember(member.id)}
-                          className="font-semibold text-blue-700"
+                          className="font-semibold text-violet-700"
                         >
-                          X
+                          ✕
                         </button>
                       </span>
                     ))}
@@ -1783,7 +1863,7 @@ const PortfolioPage = () => {
                               reachedMaxMembers ||
                               isCaptainUsername
                             }
-                            className="rounded-md bg-blue-600 px-2.5 py-1 font-semibold text-white text-xs transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="rounded-full bg-violet-600 px-2.5 py-1 font-semibold text-white text-xs transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {isCaptainUsername
                               ? 'Captain'
@@ -1815,7 +1895,7 @@ const PortfolioPage = () => {
                   selectedMembers.length === 0 ||
                   selectedMembers.length > MAX_ADDITIONAL_MEMBERS
                 }
-                className="w-full rounded-md bg-blue-600 px-4 py-3 font-semibold text-sm text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-full bg-violet-600 px-4 py-3 font-semibold text-sm text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {creatingTeam ? 'Creating...' : 'Create Team'}
               </button>
@@ -1986,10 +2066,12 @@ const PortfolioPage = () => {
                             </span>
                           </div>
 
-                          <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                            <div className="rounded border border-gray-200 bg-white px-2 py-1">
-                              <p className="text-gray-500">Shares</p>
-                              <p className="font-semibold text-gray-900">
+                          <div className="mt-2 grid grid-cols-2 gap-3">
+                            <div className="rounded-lg border border-amber-100 bg-white p-2">
+                              <span className="inline-flex rounded-full border border-amber-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-amber-800 uppercase tracking-wide">
+                                Shares
+                              </span>
+                              <p className="mt-1 font-semibold text-gray-900 text-sm">
                                 {leg.effectiveShares.toFixed(2)}
                               </p>
                               {leg.rolledInShares > 0 ? (
@@ -1999,24 +2081,30 @@ const PortfolioPage = () => {
                                 </p>
                               ) : null}
                             </div>
-                            <div className="rounded border border-gray-200 bg-white px-2 py-1">
-                              <p className="text-gray-500">Entry Price</p>
-                              <p className="font-semibold text-gray-900">
+                            <div className="rounded-lg border border-blue-100 bg-white p-2">
+                              <span className="inline-flex rounded-full border border-blue-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-blue-800 uppercase tracking-wide">
+                                Entry Price
+                              </span>
+                              <p className="mt-1 font-semibold text-gray-900 text-sm">
                                 ${leg.entryPrice.toFixed(2)}
                               </p>
                             </div>
-                            <div className="rounded border border-gray-200 bg-white px-2 py-1">
-                              <p className="text-gray-500">Current Price</p>
-                              <p className="font-semibold text-gray-900">
+                            <div className="rounded-lg border border-violet-100 bg-white p-2">
+                              <span className="inline-flex rounded-full border border-violet-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-violet-800 uppercase tracking-wide">
+                                Current Price
+                              </span>
+                              <p className="mt-1 font-semibold text-gray-900 text-sm">
                                 {metrics?.currentPrice !== null &&
                                 metrics?.currentPrice !== undefined
                                   ? `$${metrics.currentPrice.toFixed(2)}`
                                   : '--'}
                               </p>
                             </div>
-                            <div className="rounded border border-gray-200 bg-white px-2 py-1">
-                              <p className="text-gray-500">Expected Payoff</p>
-                              <p className="font-semibold text-gray-900">
+                            <div className="rounded-lg border border-emerald-100 bg-white p-2">
+                              <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-emerald-800 uppercase tracking-wide">
+                                Expected Payoff
+                              </span>
+                              <p className="mt-1 font-semibold text-gray-900 text-sm">
                                 {metrics?.expectedPayoff !== null &&
                                 metrics?.expectedPayoff !== undefined
                                   ? `$${metrics.expectedPayoff.toFixed(2)}`
