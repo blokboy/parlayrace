@@ -23,6 +23,13 @@ type PolymarketMarket = {
   closed?: boolean;
 };
 
+type PolymarketTeam = {
+  name: string;
+  logo?: string;
+  color?: string | null;
+  ordering?: string | null;
+};
+
 type PolymarketEvent = {
   id: string | number;
   title: string;
@@ -30,15 +37,53 @@ type PolymarketEvent = {
   endDate: string;
   slug?: string;
   seriesSlug?: string;
+  teams?: PolymarketTeam[] | null;
   markets?: PolymarketMarket[];
   active?: boolean;
   closed?: boolean;
 };
 
 type EnrichedMarket = PolymarketMarket & {
+  __eventId: string;
   __eventTitle: string;
   __eventSlug: string;
   __eventEndDate: string;
+  __homeTeam: string;
+  __awayTeam: string;
+  __homeLogo: string;
+  __homeColor: string | null;
+  __awayLogo: string;
+  __awayColor: string | null;
+};
+
+// Resolve home/away (name + branding) from a Polymarket event's teams[] using
+// the same ordering rules as the read path. Returns empty strings when teams
+// are missing so sub-markets still sync (branding simply stays blank).
+const resolveEventTeams = (
+  event: PolymarketEvent
+): {
+  homeTeam: string;
+  awayTeam: string;
+  homeLogo: string;
+  homeColor: string | null;
+  awayLogo: string;
+  awayColor: string | null;
+} => {
+  const teams = event.teams ?? [];
+  const home = teams.find((t) => t.ordering === 'home') ?? teams[0];
+  const away =
+    teams.find((t) => t.ordering === 'away') ??
+    teams.find((t) => t.name !== home?.name) ??
+    teams[1];
+
+  return {
+    homeTeam: home?.name ?? '',
+    awayTeam: away?.name ?? '',
+    homeLogo: home?.logo ?? '',
+    homeColor: home?.color ?? null,
+    awayLogo: away?.logo ?? '',
+    awayColor: away?.color ?? null,
+  };
 };
 
 const WIN_TITLE_REGEX = /\b(to win|beat|wins|will win|defeat)\b/i;
@@ -297,6 +342,14 @@ const runCatalogSync = async (args: {
                 description: market.__eventTitle,
                 category: 'fifa-games',
                 status: marketStatus,
+                sourceEventId: market.__eventId,
+                eventSlug: market.__eventSlug,
+                homeTeam: market.__homeTeam,
+                awayTeam: market.__awayTeam,
+                homeLogo: market.__homeLogo,
+                homeColor: market.__homeColor,
+                awayLogo: market.__awayLogo,
+                awayColor: market.__awayColor,
                 closeTime,
               })
               .onConflictDoUpdate({
@@ -305,6 +358,14 @@ const runCatalogSync = async (args: {
                   title: market.question,
                   description: market.__eventTitle,
                   status: marketStatus,
+                  sourceEventId: market.__eventId,
+                  eventSlug: market.__eventSlug,
+                  homeTeam: market.__homeTeam,
+                  awayTeam: market.__awayTeam,
+                  homeLogo: market.__homeLogo,
+                  homeColor: market.__homeColor,
+                  awayLogo: market.__awayLogo,
+                  awayColor: market.__awayColor,
                   closeTime,
                   updatedAt: new Date(),
                 },
@@ -585,17 +646,26 @@ export const syncPolyMarketMarkets = async (
       attempts: retryAttempts,
     });
 
-    // Flatten markets from qualifying events, injecting event metadata.
+    // Flatten markets from qualifying events, injecting event metadata so each
+    // sub-market carries everything the read path needs to rebuild a card.
     const markets: EnrichedMarket[] = events
       .filter((event) => isCloseTimeTodayOrTomorrow(event.endDate))
-      .flatMap((event) =>
-        (event.markets ?? []).map((market) => ({
+      .flatMap((event) => {
+        const teams = resolveEventTeams(event);
+        return (event.markets ?? []).map((market) => ({
           ...market,
+          __eventId: String(event.id),
           __eventTitle: event.title,
           __eventSlug: event.slug ?? '',
           __eventEndDate: event.endDate,
-        }))
-      )
+          __homeTeam: teams.homeTeam,
+          __awayTeam: teams.awayTeam,
+          __homeLogo: teams.homeLogo,
+          __homeColor: teams.homeColor,
+          __awayLogo: teams.awayLogo,
+          __awayColor: teams.awayColor,
+        }));
+      })
       .filter((market) => isMatchResultMarket(market))
       .slice(0, limit);
 

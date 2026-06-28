@@ -1,12 +1,5 @@
+import { db } from '@starter/backend/db';
 import { createFileRoute } from '@tanstack/react-router';
-
-type PolymarketMarket = {
-  id: string | number;
-  question: string;
-  outcomes?: string | string[];
-  outcomePrices?: string | string[];
-  updatedAt?: string;
-};
 
 type MarketDetailPayload = {
   marketId: string;
@@ -16,44 +9,15 @@ type MarketDetailPayload = {
   updatedAt: string | null;
 };
 
-const parseJsonArray = (value: string | string[] | null | undefined): string[] => {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.map(String);
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? (parsed as unknown[]).map(String) : [];
-  } catch {
-    return [];
-  }
-};
-
 const roundToCents = (value: number) => Math.round(value * 100) / 100;
 
-const toPricePair = (
-  market: PolymarketMarket
-): { yesPrice: number; noPrice: number } => {
-  const outcomes = parseJsonArray(market.outcomes);
-  const outcomePrices = parseJsonArray(market.outcomePrices).map((item) =>
-    Number(item)
-  );
-
-  if (outcomes.length === 0 || outcomePrices.length === 0) {
-    return { yesPrice: 0.5, noPrice: 0.5 };
-  }
-
-  const yesIndex = outcomes.findIndex(
-    (outcome) => outcome.toLowerCase() === 'yes'
-  );
-  const yesPriceRaw =
-    yesIndex >= 0 ? outcomePrices[yesIndex] : outcomePrices[0];
-  const yesPrice = Number.isFinite(yesPriceRaw) ? yesPriceRaw : 0.5;
-  const noPrice = Math.max(0, Math.min(1, 1 - yesPrice));
-
-  return {
-    yesPrice: roundToCents(yesPrice),
-    noPrice: roundToCents(noPrice),
-  };
-};
+const priceUnavailable = (marketId: string): MarketDetailPayload => ({
+  marketId,
+  question: 'Price unavailable',
+  yesPrice: 0.5,
+  noPrice: 0.5,
+  updatedAt: null,
+});
 
 // WIN_KEYWORDS are searched left-to-right; whichever team name appears
 // last before the keyword is the predicted winner in that market.
@@ -99,94 +63,81 @@ const classifyMarket = (
   return q.indexOf(home) < q.indexOf(away) ? 'home' : 'away';
 };
 
-const pickMarketForSide = (
-  markets: PolymarketMarket[],
-  side: string,
-  homeTeam: string,
-  awayTeam: string
-): PolymarketMarket | null => {
-  if (markets.length === 0) {
-    return null;
-  }
-
-  const target = side as 'home' | 'away' | 'draw';
-
-  const match = markets.find(
-    (market) =>
-      classifyMarket(market.question, homeTeam, awayTeam) === target
-  );
-
-  return match ?? markets[0] ?? null;
-};
-
-const fetchMarketsForEvent = async (
-  eventId: string
-): Promise<PolymarketMarket[]> => {
-  // Use the single-event endpoint — it is event-scoped and reliably returns
-  // embedded markets with outcomePrices for that specific event.
-  const eventRes = await fetch(
-    `https://gamma-api.polymarket.com/events/${encodeURIComponent(eventId)}`
-  );
-
-  if (!eventRes.ok) return [];
-
-  const event = (await eventRes.json()) as { markets?: PolymarketMarket[] };
-  return event.markets ?? [];
-};
-
 export const Route = createFileRoute('/api/markets/$marketId')({
   server: {
     handlers: {
+      // marketId is the persisted sourceEventId; the three sub-markets of the
+      // fixture share it. We pick the sub-market for `side`, then read its
+      // latest Yes-outcome snapshot from the DB.
       GET: async ({ request, params }) => {
         const marketId = params.marketId;
         const url = new URL(request.url);
-        const side = url.searchParams.get('side') ?? 'home';
-        const homeTeam = url.searchParams.get('homeTeam') ?? '';
-        const awayTeam = url.searchParams.get('awayTeam') ?? '';
+        const side = (url.searchParams.get('side') ?? 'home') as
+          | 'home'
+          | 'away'
+          | 'draw';
 
-        const markets = await fetchMarketsForEvent(marketId);
+        const rows = await db.query.externalMarket.findMany({
+          where: (t, { and, eq }) =>
+            and(
+              eq(t.sourceProvider, 'POLYMARKET'),
+              eq(t.category, 'fifa-games'),
+              eq(t.sourceEventId, marketId)
+            ),
+          columns: {
+            id: true,
+            sourceMarketId: true,
+            title: true,
+            homeTeam: true,
+            awayTeam: true,
+          },
+        });
 
-        if (markets.length === 0) {
-          return Response.json(
-            {
-              marketId,
-              question: 'Price unavailable',
-              yesPrice: 0.5,
-              noPrice: 0.5,
-              updatedAt: null,
-            } satisfies MarketDetailPayload,
-            { status: 200 }
-          );
+        if (rows.length === 0) {
+          return Response.json(priceUnavailable(marketId), { status: 200 });
         }
 
-        const selectedMarket = pickMarketForSide(
-          markets,
-          side,
-          homeTeam,
-          awayTeam
-        );
+        // Prefer the team names from the query string, falling back to stored.
+        const homeTeam =
+          url.searchParams.get('homeTeam') ?? rows[0].homeTeam ?? '';
+        const awayTeam =
+          url.searchParams.get('awayTeam') ?? rows[0].awayTeam ?? '';
 
-        if (!selectedMarket) {
-          return Response.json(
-            {
-              marketId,
-              question: 'Price unavailable',
-              yesPrice: 0.5,
-              noPrice: 0.5,
-              updatedAt: null,
-            } satisfies MarketDetailPayload,
-            { status: 200 }
-          );
+        const selected =
+          rows.find((r) => classifyMarket(r.title, homeTeam, awayTeam) === side) ??
+          rows[0];
+
+        // Resolve the latest Yes price for the selected sub-market.
+        const outcomes = await db.query.externalOutcome.findMany({
+          where: (t, { eq }) => eq(t.marketId, selected.id),
+          columns: { id: true, label: true },
+        });
+
+        const yesOutcome =
+          outcomes.find((o) => o.label.toLowerCase() === 'yes') ?? outcomes[0];
+
+        if (!yesOutcome) {
+          return Response.json(priceUnavailable(selected.sourceMarketId), {
+            status: 200,
+          });
         }
 
-        const prices = toPricePair(selectedMarket);
+        const latest = await db.query.externalPriceSnapshot.findFirst({
+          where: (t, { eq }) => eq(t.outcomeId, yesOutcome.id),
+          orderBy: (t, { desc }) => desc(t.fetchedAt),
+          columns: { price: true, fetchedAt: true },
+        });
+
+        const yesPriceRaw = latest ? Number(latest.price) : 0.5;
+        const yesPrice = Number.isFinite(yesPriceRaw) ? yesPriceRaw : 0.5;
+        const noPrice = Math.max(0, Math.min(1, 1 - yesPrice));
 
         return Response.json({
-          marketId: String(selectedMarket.id),
-          question: selectedMarket.question,
-          yesPrice: prices.yesPrice,
-          noPrice: prices.noPrice,
-          updatedAt: selectedMarket.updatedAt ?? null,
+          marketId: selected.sourceMarketId,
+          question: selected.title,
+          yesPrice: roundToCents(yesPrice),
+          noPrice: roundToCents(noPrice),
+          updatedAt: latest ? latest.fetchedAt.toISOString() : null,
         } satisfies MarketDetailPayload);
       },
     },

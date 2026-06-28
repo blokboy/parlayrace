@@ -130,6 +130,18 @@ export const externalMarket = pgTable(
     description: text(),
     category: text(),
     status: marketStatus().notNull().default('OPEN'),
+    // Event-level metadata, denormalized onto each sub-market so a match card
+    // can be reconstructed from the DB without a separate event table. The
+    // three sub-markets (home/draw/away) of a fixture share the same
+    // sourceEventId, eventSlug, teams, and branding.
+    sourceEventId: text(),
+    eventSlug: text(),
+    homeTeam: text(),
+    awayTeam: text(),
+    homeLogo: text(),
+    homeColor: text(),
+    awayLogo: text(),
+    awayColor: text(),
     closeTime: timestamp(),
     resolveTime: timestamp(),
     createdAt: timestamp().defaultNow().notNull(),
