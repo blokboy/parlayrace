@@ -327,8 +327,14 @@ const isParlayInHistory = (team: ParlayTeam): boolean => {
     return true;
   }
 
+  // An inactive, empty parlay drops into history 12h after creation. It returns
+  // to the top the moment it has a pending (not-yet-started) leg.
   if (team.committedLegs.length === 0) {
-    return false;
+    const createdMs = new Date(team.createdAt).getTime();
+    return (
+      Number.isFinite(createdMs) &&
+      createdMs < Date.now() - PARLAY_HISTORY_CUTOFF_MS
+    );
   }
 
   const latestKickoffMs = team.committedLegs.reduce((max, leg) => {
@@ -392,6 +398,37 @@ const getLegBadgeClassName = (
   }
 
   return 'border-blue-200 text-blue-700';
+};
+
+// Timeline node + card outline color for a leg: won → green, lost → red,
+// rolled over → amber, currently active (started, unresolved) → purple,
+// pending (not started) → gray.
+const getLegTimelineClasses = (
+  leg: TeamCommittedLeg,
+  status: LiveStatus | undefined
+): { node: string; outline: string } => {
+  if (leg.result === 'WON') {
+    return { node: 'bg-green-500', outline: 'border-green-300' };
+  }
+
+  if (leg.result === 'LOST') {
+    return { node: 'bg-red-500', outline: 'border-red-300' };
+  }
+
+  if (leg.result === 'ROLLED_OVER') {
+    return { node: 'bg-amber-500', outline: 'border-amber-300' };
+  }
+
+  const kickoffMs = new Date(leg.kickoff).getTime();
+  const hasStarted =
+    Boolean(status?.hasStarted) ||
+    (Number.isFinite(kickoffMs) && kickoffMs <= Date.now());
+
+  if (hasStarted) {
+    return { node: 'bg-violet-500', outline: 'border-violet-400' };
+  }
+
+  return { node: 'bg-gray-300', outline: 'border-gray-200' };
 };
 
 const MAX_ADDITIONAL_MEMBERS = 9;
@@ -2002,10 +2039,13 @@ const PortfolioPage = () => {
                 Committed Legs
               </p>
               {selectedParlayTeam?.committedLegs.length ? (
-                <div className="mt-3 space-y-0">
+                <div className="relative mt-3 space-y-4">
+                  {/* Connector line down the horizontal center, behind the legs. */}
+                  <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-gray-200" />
                   {selectedParlayTeam.committedLegs.map((leg) => {
                     const metrics = teamLegMetricsById[leg.id];
                     const liveStatus = teamLegLiveStatusesById[leg.id];
+                    const timeline = getLegTimelineClasses(leg, liveStatus);
                     // A leg can only roll over while a later leg is still
                     // pending and hasn't kicked off yet (the rollover target).
                     // The final leg / single-leg parlay therefore can't roll.
@@ -2020,11 +2060,14 @@ const PortfolioPage = () => {
                     return (
                       <div
                         key={`${selectedParlayTeam.id}-${leg.positionId}`}
-                        className="relative pl-8"
+                        className="relative pt-3"
                       >
-                        <div className="absolute top-0 bottom-0 left-3 w-px bg-gray-200" />
-                        <div className="absolute top-4 left-[9px] h-3 w-3 rounded-full border border-white bg-violet-500" />
-                        <div className="rounded-md border border-gray-200 bg-white px-3 py-2">
+                        <div
+                          className={`absolute top-0 left-1/2 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-white ${timeline.node}`}
+                        />
+                        <div
+                          className={`relative rounded-md border bg-white px-3 py-2 ${timeline.outline}`}
+                        >
                           <div className="flex flex-wrap items-center gap-2">
                             <span
                               className={`inline-flex rounded-full border bg-white px-2 py-0.5 font-semibold text-[11px] ${getLegBadgeClassName(leg, liveStatus)}`}
