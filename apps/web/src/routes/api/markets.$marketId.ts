@@ -66,42 +66,39 @@ const classifyMarket = (
   homeTeam: string,
   awayTeam: string
 ): 'home' | 'away' | 'draw' | null => {
-  const q = question.toLowerCase();
+  const q = question.toLowerCase().trim();
   const home = homeTeam.toLowerCase();
   const away = awayTeam.toLowerCase();
 
-  if (q.includes('draw')) {
-    return 'draw';
+  if (!home || !away) return null;
+
+  const hasHome = q.includes(home);
+  const hasAway = q.includes(away);
+
+  // Polymarket often labels markets with just the outcome ("Algeria", "Draw").
+  // When only one team name is present the whole question IS that team's market.
+  if (hasHome && !hasAway) return 'home';
+  if (hasAway && !hasHome) return 'away';
+
+  if (!hasHome && !hasAway) {
+    return q.includes('draw') ? 'draw' : null;
   }
 
-  for (const keyword of WIN_KEYWORDS) {
-    const keywordIdx = q.indexOf(keyword);
-    if (keywordIdx < 0) {
-      continue;
-    }
+  // Both teams present → full-sentence question; keyword / position matching.
+  if (q.includes('draw')) return 'draw';
 
-    // Find the rightmost occurrence of each team name BEFORE the keyword —
-    // that team is the subject of the win clause.
-    const homeIdx = q.lastIndexOf(home, keywordIdx - 1);
-    const awayIdx = q.lastIndexOf(away, keywordIdx - 1);
+  for (const kw of WIN_KEYWORDS) {
+    const kwIdx = q.indexOf(kw);
+    if (kwIdx < 0) continue;
 
-    if (homeIdx >= 0 && (awayIdx < 0 || homeIdx > awayIdx)) {
-      return 'home';
-    }
-    if (awayIdx >= 0 && (homeIdx < 0 || awayIdx > homeIdx)) {
-      return 'away';
-    }
+    const homeIdx = q.lastIndexOf(home, kwIdx - 1);
+    const awayIdx = q.lastIndexOf(away, kwIdx - 1);
+
+    if (homeIdx >= 0 && (awayIdx < 0 || homeIdx > awayIdx)) return 'home';
+    if (awayIdx >= 0 && (homeIdx < 0 || awayIdx > homeIdx)) return 'away';
   }
 
-  // Fallback: whichever team appears first in the question is the winner
-  // (handles formats like "[Team A] vs [Team B]" where Team A is the subject).
-  const firstHome = q.indexOf(home);
-  const firstAway = q.indexOf(away);
-  if (firstHome >= 0 && firstAway >= 0) {
-    return firstHome < firstAway ? 'home' : 'away';
-  }
-
-  return null;
+  return q.indexOf(home) < q.indexOf(away) ? 'home' : 'away';
 };
 
 const pickMarketForSide = (

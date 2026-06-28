@@ -92,17 +92,32 @@ const classifyMarket = (
   homeTeam: string,
   awayTeam: string
 ): 'home' | 'away' | 'draw' | null => {
-  const q = question.toLowerCase();
+  const q = question.toLowerCase().trim();
   const home = homeTeam.toLowerCase();
   const away = awayTeam.toLowerCase();
 
+  if (!home || !away) return null;
+
+  const hasHome = q.includes(home);
+  const hasAway = q.includes(away);
+
+  // Polymarket often uses bare outcome labels ("Algeria", "Draw", "Austria").
+  // When only one team is present the whole question IS that team's market.
+  if (hasHome && !hasAway) return 'home';
+  if (hasAway && !hasHome) return 'away';
+
+  // Neither team mentioned — only remaining possibility is a draw label.
+  if (!hasHome && !hasAway) {
+    return q.includes('draw') ? 'draw' : null;
+  }
+
+  // Both teams present → full-sentence question; use keyword / position matching.
   if (q.includes('draw')) return 'draw';
 
   for (const kw of WIN_KEYWORDS) {
     const kwIdx = q.indexOf(kw);
     if (kwIdx < 0) continue;
 
-    // The team whose name appears rightmost BEFORE the win keyword is the winner.
     const homeIdx = q.lastIndexOf(home, kwIdx - 1);
     const awayIdx = q.lastIndexOf(away, kwIdx - 1);
 
@@ -110,14 +125,7 @@ const classifyMarket = (
     if (awayIdx >= 0 && (homeIdx < 0 || awayIdx > homeIdx)) return 'away';
   }
 
-  // Fallback: whichever team is mentioned first is the predicted winner.
-  const firstHome = q.indexOf(home);
-  const firstAway = q.indexOf(away);
-  if (firstHome >= 0 && firstAway >= 0) {
-    return firstHome < firstAway ? 'home' : 'away';
-  }
-
-  return null;
+  return q.indexOf(home) < q.indexOf(away) ? 'home' : 'away';
 };
 
 const findLegPrices = (

@@ -20,12 +20,12 @@ type MarketLeg = {
 type MarketItem = {
   id: string;
   sourceProvider: 'POLYMARKET';
-  category: 'fifa-games';
+  category: 'fifa-games' | 'mlb-games';
   matchup: string;
   kickoff: string;
   homeTeam: string;
   awayTeam: string;
-  legs: [MarketLeg, MarketLeg, MarketLeg];
+  legs: MarketLeg[];
 };
 
 type TeamBranding = {
@@ -45,10 +45,11 @@ type MarketCard = {
   matchup: string;
   kickoffIso: string;
   kickoff: string;
+  category: 'fifa-games' | 'mlb-games';
   home: { name: string; logo: string; color: string | null };
   away: { name: string; logo: string; color: string | null };
   homeLeg: MarketLeg;
-  drawLeg: MarketLeg;
+  drawLeg: MarketLeg | null;
   awayLeg: MarketLeg;
 };
 
@@ -259,13 +260,13 @@ const toMarketCard = (
   timeZone: string
 ): MarketCard | null => {
   const homeLeg = market.legs.find((leg) => leg.side === 'home');
-  const drawLeg = market.legs.find((leg) => leg.side === 'draw');
   const awayLeg = market.legs.find((leg) => leg.side === 'away');
 
-  if (!homeLeg || !drawLeg || !awayLeg) {
+  if (!homeLeg || !awayLeg) {
     return null;
   }
 
+  const drawLeg = market.legs.find((leg) => leg.side === 'draw') ?? null;
   const homeBrand = teamBrands[market.homeTeam];
   const awayBrand = teamBrands[market.awayTeam];
 
@@ -274,6 +275,7 @@ const toMarketCard = (
     matchup: market.matchup,
     kickoffIso: market.kickoff,
     kickoff: formatKickoff(market.kickoff, timeZone),
+    category: market.category,
     home: {
       name: market.homeTeam,
       logo: homeBrand?.logo ?? '',
@@ -311,20 +313,28 @@ const fetchMarkets = async (): Promise<MarketItem[]> => {
     )
   ).toISOString();
 
-  const response = await fetch(
-    `/api/markets?sourceProvider=POLYMARKET&category=fifa-games&dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`,
-    {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    }
-  );
+  const qs = `dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`;
 
-  if (!response.ok) {
-    return [];
-  }
+  const [fifaRes, mlbRes] = await Promise.all([
+    fetch(
+      `/api/markets?sourceProvider=POLYMARKET&category=fifa-games&${qs}`,
+      { method: 'GET', headers: { Accept: 'application/json' } }
+    ),
+    fetch(
+      `/api/mlb-markets?${qs}`,
+      { method: 'GET', headers: { Accept: 'application/json' } }
+    ),
+  ]);
 
-  const payload = (await response.json()) as { markets?: MarketItem[] };
-  return payload.markets ?? [];
+  const fifaMarkets = fifaRes.ok
+    ? ((await fifaRes.json()) as { markets?: MarketItem[] }).markets ?? []
+    : [];
+
+  const mlbMarkets = mlbRes.ok
+    ? ((await mlbRes.json()) as { markets?: MarketItem[] }).markets ?? []
+    : [];
+
+  return [...fifaMarkets, ...mlbMarkets];
 };
 
 const fetchTeamBranding = async (
@@ -446,7 +456,7 @@ const StatusBadge = ({
   // side will have yesPrice ≈ 1.0, losing sides ≈ 0.0.
   const prices = resolvedPrices[card.id];
   const homeP = prices?.home ?? card.homeLeg.yesPrice;
-  const drawP = prices?.draw ?? card.drawLeg.yesPrice;
+  const drawP = prices?.draw ?? (card.drawLeg?.yesPrice ?? 0);
   const awayP = prices?.away ?? card.awayLeg.yesPrice;
   const maxP = Math.max(homeP, drawP, awayP);
 
@@ -627,7 +637,7 @@ const DashboardPage = () => {
           card.id,
           {
             home: homeDetail?.yesPrice ?? card.homeLeg.yesPrice,
-            draw: drawDetail?.yesPrice ?? card.drawLeg.yesPrice,
+            draw: drawDetail?.yesPrice ?? (card.drawLeg?.yesPrice ?? 0),
             away: awayDetail?.yesPrice ?? card.awayLeg.yesPrice,
           },
         ] as const;
@@ -778,7 +788,11 @@ const DashboardPage = () => {
           : 'Draw';
 
     const leg =
-      side === 'home' ? card.homeLeg : side === 'away' ? card.awayLeg : card.drawLeg;
+      side === 'home'
+        ? card.homeLeg
+        : side === 'away'
+          ? card.awayLeg
+          : (card.drawLeg ?? card.homeLeg);
 
     // Pre-populate immediately from the embedded leg prices so the modal
     // opens with real prices instead of showing a loading skeleton.
@@ -911,11 +925,13 @@ const DashboardPage = () => {
                     team={card.home}
                     onClick={() => openTradeModal(card, 'home')}
                   />
-                  <FlagButton
-                    team={card.home}
-                    draw={true}
-                    onClick={() => openTradeModal(card, 'draw')}
-                  />
+                  {card.drawLeg ? (
+                    <FlagButton
+                      team={card.home}
+                      draw={true}
+                      onClick={() => openTradeModal(card, 'draw')}
+                    />
+                  ) : null}
                   <FlagButton
                     team={card.away}
                     onClick={() => openTradeModal(card, 'away')}
