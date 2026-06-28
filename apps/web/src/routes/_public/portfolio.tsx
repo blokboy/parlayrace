@@ -1768,6 +1768,11 @@ const PortfolioPage = () => {
                   {selectedParlayTeam.committedLegs.map((leg) => {
                     const metrics = teamLegMetricsById[leg.id];
                     const liveStatus = teamLegLiveStatusesById[leg.id];
+                    // The final leg has nothing to roll into, so it (and a
+                    // single-leg parlay) can't be rolled over.
+                    const hasLaterLeg = selectedParlayTeam.committedLegs.some(
+                      (other) => other.sequence > leg.sequence
+                    );
 
                     return (
                       <div
@@ -1793,7 +1798,8 @@ const PortfolioPage = () => {
                               {leg.cardTitle}
                             </p>
                             {leg.result === 'PENDING' &&
-                            leg.addedByUsername === username ? (
+                            leg.addedByUsername === username &&
+                            hasLaterLeg ? (
                               rolloverLegId === leg.id ? (
                                 <div className="flex flex-col items-end gap-1.5">
                                   <div className="flex gap-1.5">
