@@ -89,6 +89,7 @@ type TeamCommittedLeg = {
   principalShares: number;
   rolledInShares: number;
   effectiveShares: number;
+  rolledForward: boolean;
   resolvedAt: string | null;
 };
 
@@ -1161,8 +1162,15 @@ const PortfolioPage = () => {
         0
       );
 
+      // Potential payout = the value the parlay pays if it hits = the effective
+      // shares of every terminal leg (those whose value hasn't rolled forward
+      // into a later leg). Rolled-over legs are captured in their target's
+      // rolled-in shares, so excluding them avoids double counting and reflects
+      // the compounding after each rollover.
       const potentialPayout = roundToCents(
-        team.committedLegs.reduce((sum, leg) => sum + leg.shares, 0)
+        team.committedLegs
+          .filter((leg) => !leg.rolledForward && leg.result !== 'LOST')
+          .reduce((sum, leg) => sum + leg.effectiveShares, 0)
       );
 
       acc[team.id] = {
@@ -2561,6 +2569,7 @@ const PortfolioPage = () => {
                     const metrics = teamLegMetricsById[leg.id];
                     const liveStatus = teamLegLiveStatusesById[leg.id];
                     const timeline = getLegTimelineClasses(leg, liveStatus);
+                    const isRolledOver = leg.result === 'ROLLED_OVER';
                     // A leg can only roll over while a later leg is still
                     // pending and hasn't kicked off yet (the rollover target).
                     // The final leg / single-leg parlay therefore can't roll.
@@ -2585,7 +2594,11 @@ const PortfolioPage = () => {
                           className={`absolute top-0 left-1/2 z-10 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white ${timeline.node}`}
                         />
                         <div
-                          className={`relative rounded-md border bg-white px-3 py-2 ${timeline.outline}`}
+                          className={`relative rounded-md border px-3 py-2 ${timeline.outline} ${
+                            isRolledOver
+                              ? 'border-dashed bg-amber-50/40 opacity-70'
+                              : 'bg-white'
+                          }`}
                         >
                           <div className="flex flex-wrap items-center gap-2">
                             <span
@@ -2606,9 +2619,17 @@ const PortfolioPage = () => {
                             <p className="font-medium text-gray-900 text-sm">
                               {leg.cardTitle}
                             </p>
-                            {leg.result === 'PENDING' &&
-                            leg.addedByUsername === username &&
-                            hasRolloverTarget ? (
+                            {isRolledOver ? (
+                              <button
+                                type="button"
+                                disabled
+                                className="cursor-not-allowed rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 font-semibold text-[11px] text-amber-700 opacity-80"
+                              >
+                                Rolled Over
+                              </button>
+                            ) : leg.result === 'PENDING' &&
+                              leg.addedByUsername === username &&
+                              hasRolloverTarget ? (
                               rolloverLegId === leg.id ? (
                                 <div className="flex flex-col items-end gap-1.5">
                                   <div className="flex gap-1.5">

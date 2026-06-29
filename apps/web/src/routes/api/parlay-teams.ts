@@ -101,6 +101,9 @@ type TeamCommittedLeg = {
   principalShares: number;
   rolledInShares: number;
   effectiveShares: number;
+  // True when this leg's value has rolled forward into a later leg (manual or
+  // auto). Such legs are terminal=false for potential-payout purposes.
+  rolledForward: boolean;
   resolvedAt: string | null;
 };
 
@@ -1295,6 +1298,9 @@ const buildTeamResponses = async (
               .filter((rollover) => rollover.targetShareId === share.id)
               .reduce((sum, rollover) => sum + rollover.sharesAdded, 0)
           );
+          const rolledForward = rollovers.some(
+            (rollover) => rollover.sourceShareId === share.id
+          );
 
           return {
             id: share.id,
@@ -1350,6 +1356,7 @@ const buildTeamResponses = async (
             principalShares: roundToCents(share.shares),
             rolledInShares,
             effectiveShares: roundToCents(share.shares + rolledInShares),
+            rolledForward,
             resolvedAt: share.resolvedAt
               ? new Date(share.resolvedAt).toISOString()
               : null,
