@@ -30,6 +30,7 @@ import { Route as ApiSyncPolymarketRouteImport } from './routes/api/sync/polymar
 import { Route as ApiMarketsMarketIdRouteImport } from './routes/api/markets.$marketId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiSyncPolymarketScheduledRouteImport } from './routes/api/sync/polymarket.scheduled'
+import { Route as ApiMarketsMarketIdCombosRouteImport } from './routes/api/markets.$marketId.combos'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -136,6 +137,12 @@ const ApiSyncPolymarketScheduledRoute =
     path: '/scheduled',
     getParentRoute: () => ApiSyncPolymarketRoute,
   } as any)
+const ApiMarketsMarketIdCombosRoute =
+  ApiMarketsMarketIdCombosRouteImport.update({
+    id: '/combos',
+    path: '/combos',
+    getParentRoute: () => ApiMarketsMarketIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof PublicIndexRoute
@@ -155,8 +162,9 @@ export interface FileRoutesByFullPath {
   '/auth/login': typeof AuthLoginRoute
   '/auth/username': typeof AuthUsernameRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
+  '/api/markets/$marketId': typeof ApiMarketsMarketIdRouteWithChildren
   '/api/sync/polymarket': typeof ApiSyncPolymarketRouteWithChildren
+  '/api/markets/$marketId/combos': typeof ApiMarketsMarketIdCombosRoute
   '/api/sync/polymarket/scheduled': typeof ApiSyncPolymarketScheduledRoute
 }
 export interface FileRoutesByTo {
@@ -177,8 +185,9 @@ export interface FileRoutesByTo {
   '/auth/username': typeof AuthUsernameRoute
   '/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
+  '/api/markets/$marketId': typeof ApiMarketsMarketIdRouteWithChildren
   '/api/sync/polymarket': typeof ApiSyncPolymarketRouteWithChildren
+  '/api/markets/$marketId/combos': typeof ApiMarketsMarketIdCombosRoute
   '/api/sync/polymarket/scheduled': typeof ApiSyncPolymarketScheduledRoute
 }
 export interface FileRoutesById {
@@ -201,8 +210,9 @@ export interface FileRoutesById {
   '/auth/username': typeof AuthUsernameRoute
   '/_public/': typeof PublicIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/markets/$marketId': typeof ApiMarketsMarketIdRoute
+  '/api/markets/$marketId': typeof ApiMarketsMarketIdRouteWithChildren
   '/api/sync/polymarket': typeof ApiSyncPolymarketRouteWithChildren
+  '/api/markets/$marketId/combos': typeof ApiMarketsMarketIdCombosRoute
   '/api/sync/polymarket/scheduled': typeof ApiSyncPolymarketScheduledRoute
 }
 export interface FileRouteTypes {
@@ -227,6 +237,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/markets/$marketId'
     | '/api/sync/polymarket'
+    | '/api/markets/$marketId/combos'
     | '/api/sync/polymarket/scheduled'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -249,6 +260,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/markets/$marketId'
     | '/api/sync/polymarket'
+    | '/api/markets/$marketId/combos'
     | '/api/sync/polymarket/scheduled'
   id:
     | '__root__'
@@ -272,6 +284,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/markets/$marketId'
     | '/api/sync/polymarket'
+    | '/api/markets/$marketId/combos'
     | '/api/sync/polymarket/scheduled'
   fileRoutesById: FileRoutesById
 }
@@ -439,6 +452,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSyncPolymarketScheduledRouteImport
       parentRoute: typeof ApiSyncPolymarketRoute
     }
+    '/api/markets/$marketId/combos': {
+      id: '/api/markets/$marketId/combos'
+      path: '/combos'
+      fullPath: '/api/markets/$marketId/combos'
+      preLoaderRoute: typeof ApiMarketsMarketIdCombosRouteImport
+      parentRoute: typeof ApiMarketsMarketIdRoute
+    }
   }
 }
 
@@ -473,12 +493,23 @@ const AuthRouteChildren: AuthRouteChildren = {
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
+interface ApiMarketsMarketIdRouteChildren {
+  ApiMarketsMarketIdCombosRoute: typeof ApiMarketsMarketIdCombosRoute
+}
+
+const ApiMarketsMarketIdRouteChildren: ApiMarketsMarketIdRouteChildren = {
+  ApiMarketsMarketIdCombosRoute: ApiMarketsMarketIdCombosRoute,
+}
+
+const ApiMarketsMarketIdRouteWithChildren =
+  ApiMarketsMarketIdRoute._addFileChildren(ApiMarketsMarketIdRouteChildren)
+
 interface ApiMarketsRouteChildren {
-  ApiMarketsMarketIdRoute: typeof ApiMarketsMarketIdRoute
+  ApiMarketsMarketIdRoute: typeof ApiMarketsMarketIdRouteWithChildren
 }
 
 const ApiMarketsRouteChildren: ApiMarketsRouteChildren = {
-  ApiMarketsMarketIdRoute: ApiMarketsMarketIdRoute,
+  ApiMarketsMarketIdRoute: ApiMarketsMarketIdRouteWithChildren,
 }
 
 const ApiMarketsRouteWithChildren = ApiMarketsRoute._addFileChildren(

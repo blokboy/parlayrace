@@ -7,16 +7,21 @@ type MarketDetailPayload = {
   yesPrice: number;
   noPrice: number;
   updatedAt: string | null;
+  category: string | null;
 };
 
 const roundToCents = (value: number) => Math.round(value * 100) / 100;
 
-const priceUnavailable = (marketId: string): MarketDetailPayload => ({
+const priceUnavailable = (
+  marketId: string,
+  category: string | null = null
+): MarketDetailPayload => ({
   marketId,
   question: 'Price unavailable',
   yesPrice: 0.5,
   noPrice: 0.5,
   updatedAt: null,
+  category,
 });
 
 // WIN_KEYWORDS are searched left-to-right; whichever team name appears
@@ -90,6 +95,7 @@ export const Route = createFileRoute('/api/markets/$marketId')({
             title: true,
             homeTeam: true,
             awayTeam: true,
+            category: true,
           },
         });
 
@@ -97,16 +103,23 @@ export const Route = createFileRoute('/api/markets/$marketId')({
           return Response.json(priceUnavailable(marketId), { status: 200 });
         }
 
+        const category = rows[0].category ?? null;
+
         // Prefer the team names from the query string, falling back to stored.
         const homeTeam =
           url.searchParams.get('homeTeam') ?? rows[0].homeTeam ?? '';
         const awayTeam =
           url.searchParams.get('awayTeam') ?? rows[0].awayTeam ?? '';
-        const targetTeam = side === 'home' ? homeTeam : side === 'away' ? awayTeam : '';
+        const targetTeam =
+          side === 'home' ? homeTeam : side === 'away' ? awayTeam : '';
 
         // All outcomes for the event's sub-market(s), with latest prices.
         const outcomes = await db.query.externalOutcome.findMany({
-          where: (t, { inArray }) => inArray(t.marketId, rows.map((r) => r.id)),
+          where: (t, { inArray }) =>
+            inArray(
+              t.marketId,
+              rows.map((r) => r.id)
+            ),
           columns: { id: true, marketId: true, label: true },
         });
 
@@ -148,9 +161,10 @@ export const Route = createFileRoute('/api/markets/$marketId')({
         }
 
         if (!priceOutcomeId) {
-          return Response.json(priceUnavailable(selected.sourceMarketId), {
-            status: 200,
-          });
+          return Response.json(
+            priceUnavailable(selected.sourceMarketId, category),
+            { status: 200 }
+          );
         }
 
         const latest = await latestForOutcome(priceOutcomeId);
@@ -164,6 +178,7 @@ export const Route = createFileRoute('/api/markets/$marketId')({
           yesPrice: roundToCents(yesPrice),
           noPrice: roundToCents(noPrice),
           updatedAt: latest ? latest.fetchedAt.toISOString() : null,
+          category,
         } satisfies MarketDetailPayload);
       },
     },
