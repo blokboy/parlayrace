@@ -834,9 +834,10 @@ const PortfolioPage = () => {
   const [teamBrandingByName, setTeamBrandingByName] = useState<
     Record<string, TeamBranding>
   >({});
-  // Spreads/Totals badge + carousel state, keyed so only one carousel is open.
-  const [expandedCombo, setExpandedCombo] = useState<{
-    positionId: string;
+  // The Spreads/Totals option picker, shown as a bottom sheet on mobile. Spread
+  // and total are added independently — open one, add it, then open the other.
+  const [comboPicker, setComboPicker] = useState<{
+    position: PaperPosition;
     type: ComboMarketType;
   } | null>(null);
   const [comboOptionsByEvent, setComboOptionsByEvent] = useState<
@@ -1562,14 +1563,10 @@ const PortfolioPage = () => {
     setSellShares(roundToCents(position.quantity));
   };
 
-  // Toggle the Spreads/Totals carousel under a card, lazily fetching the game's
-  // options the first time it's opened.
-  const toggleCombo = (position: PaperPosition, type: ComboMarketType) => {
-    setExpandedCombo((current) =>
-      current?.positionId === position.id && current.type === type
-        ? null
-        : { positionId: position.id, type }
-    );
+  // Open the Spreads/Totals picker (bottom sheet on mobile), lazily fetching the
+  // game's options the first time it's opened.
+  const openComboPicker = (position: PaperPosition, type: ComboMarketType) => {
+    setComboPicker({ position, type });
 
     const eventId = position.marketId;
     if (comboOptionsByEvent[eventId] || loadingCombosByEvent[eventId]) {
@@ -1651,8 +1648,8 @@ const PortfolioPage = () => {
 
     if (saved) {
       setPortfolioState(nextState);
+      // Leave the carousels open so the user can also add the other type.
       setComboBet(null);
-      setExpandedCombo(null);
     }
   };
 
@@ -1985,6 +1982,22 @@ const PortfolioPage = () => {
                       </div>
 
                       <div className="mt-4 border-gray-100 border-t pt-3">
+                        {positionCategoryById[position.id] === 'mlb-games' &&
+                        !position.comboMarketId ? (
+                          <div className="mb-3 flex flex-wrap items-center gap-2">
+                            {(['spread', 'total'] as const).map((type) => (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => openComboPicker(position, type)}
+                                className="inline-flex rounded-full border border-gray-200 bg-white px-3 py-1 font-semibold text-gray-600 text-xs transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+                              >
+                                {type === 'spread' ? 'Spreads' : 'Totals'}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-gray-500 text-xs">
                             Created {formatTradeTime(position.createdAt)}
@@ -1997,92 +2010,6 @@ const PortfolioPage = () => {
                             SELL
                           </button>
                         </div>
-
-                        {positionCategoryById[position.id] === 'mlb-games' &&
-                        !position.comboMarketId ? (
-                          <div className="mt-3 space-y-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              {(['spread', 'total'] as const).map((type) => {
-                                const active =
-                                  expandedCombo?.positionId === position.id &&
-                                  expandedCombo.type === type;
-                                return (
-                                  <button
-                                    key={type}
-                                    type="button"
-                                    onClick={() => toggleCombo(position, type)}
-                                    className={`inline-flex rounded-full border px-3 py-1 font-semibold text-xs transition ${active ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:border-indigo-300 hover:text-indigo-700'}`}
-                                  >
-                                    {type === 'spread' ? 'Spreads' : 'Totals'}
-                                  </button>
-                                );
-                              })}
-                            </div>
-
-                            {expandedCombo?.positionId === position.id
-                              ? (() => {
-                                  const eventId = position.marketId;
-                                  const options = comboOptionsByEvent[eventId];
-                                  const list =
-                                    expandedCombo.type === 'spread'
-                                      ? (options?.spreads ?? [])
-                                      : (options?.totals ?? []);
-
-                                  if (
-                                    loadingCombosByEvent[eventId] &&
-                                    !options
-                                  ) {
-                                    return (
-                                      <Skeleton className="h-16 w-full rounded-lg bg-gray-100" />
-                                    );
-                                  }
-
-                                  if (list.length === 0) {
-                                    return (
-                                      <p className="text-gray-500 text-xs">
-                                        No{' '}
-                                        {expandedCombo.type === 'spread'
-                                          ? 'spread'
-                                          : 'total'}{' '}
-                                        markets available right now.
-                                      </p>
-                                    );
-                                  }
-
-                                  return (
-                                    <Carousel
-                                      opts={{ align: 'start', dragFree: true }}
-                                      className="w-full"
-                                    >
-                                      <CarouselContent className="-ml-2">
-                                        {list.map((option) => (
-                                          <CarouselItem
-                                            key={`${option.sourceMarketId}-${option.outcomeLabel}`}
-                                            className="basis-1/2 pl-2"
-                                          >
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                openComboBet(position, option)
-                                              }
-                                              className="flex w-full flex-col gap-1 rounded-lg border border-gray-200 bg-white p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50"
-                                            >
-                                              <span className="font-semibold text-gray-900 text-xs">
-                                                {option.label}
-                                              </span>
-                                              <span className="font-semibold text-indigo-700 text-sm">
-                                                ${option.price.toFixed(2)}
-                                              </span>
-                                            </button>
-                                          </CarouselItem>
-                                        ))}
-                                      </CarouselContent>
-                                    </Carousel>
-                                  );
-                                })()
-                              : null}
-                          </div>
-                        ) : null}
                       </div>
                     </article>
                   ))}
@@ -2838,6 +2765,99 @@ const PortfolioPage = () => {
                 </div>
               </>
             )}
+          </div>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
+
+      <ResponsiveDialog
+        open={comboPicker !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setComboPicker(null);
+          }
+        }}
+      >
+        <ResponsiveDialogContent
+          showCloseButton={false}
+          className="max-w-md border-violet-200 bg-white"
+        >
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle className="text-violet-950">
+              {comboPicker?.type === 'spread' ? 'Spreads' : 'Totals'}
+            </ResponsiveDialogTitle>
+            <p className="text-sm text-violet-800">
+              {comboPicker
+                ? comboPicker.position.matchup
+                : 'Loading selection...'}
+            </p>
+            <ResponsiveDialogClose
+              aria-label="Close picker modal"
+              className="absolute top-4 right-4 rounded-full border border-violet-200 bg-white px-3 py-1 font-semibold text-violet-700 text-xs transition hover:border-violet-300 hover:bg-violet-50"
+            >
+              Close
+            </ResponsiveDialogClose>
+          </ResponsiveDialogHeader>
+
+          <div className="space-y-3">
+            {(() => {
+              if (!comboPicker) {
+                return null;
+              }
+
+              const eventId = comboPicker.position.marketId;
+              const options = comboOptionsByEvent[eventId];
+              const list =
+                comboPicker.type === 'spread'
+                  ? (options?.spreads ?? [])
+                  : (options?.totals ?? []);
+
+              if (loadingCombosByEvent[eventId] && !options) {
+                return (
+                  <Skeleton className="h-16 w-full rounded-lg bg-violet-100" />
+                );
+              }
+
+              if (list.length === 0) {
+                return (
+                  <p className="text-sm text-violet-700">
+                    No {comboPicker.type === 'spread' ? 'spread' : 'total'}{' '}
+                    markets available right now.
+                  </p>
+                );
+              }
+
+              return (
+                <Carousel
+                  opts={{ align: 'start', dragFree: true }}
+                  className="w-full"
+                >
+                  <CarouselContent className="-ml-2">
+                    {list.map((option) => (
+                      <CarouselItem
+                        key={`${option.sourceMarketId}-${option.outcomeLabel}`}
+                        className="basis-1/2 pl-2"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            openComboBet(comboPicker.position, option);
+                            setComboPicker(null);
+                          }}
+                          className="flex w-full flex-col gap-1 rounded-lg border border-violet-200 bg-white p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50"
+                        >
+                          <span className="font-semibold text-gray-900 text-xs">
+                            {option.label}
+                          </span>
+                          <span className="font-semibold text-indigo-700 text-sm">
+                            ${option.price.toFixed(2)}
+                          </span>
+                        </button>
+                      </CarouselItem>
+                    ))}
+                  </CarouselContent>
+                </Carousel>
+              );
+            })()}
           </div>
         </ResponsiveDialogContent>
       </ResponsiveDialog>
