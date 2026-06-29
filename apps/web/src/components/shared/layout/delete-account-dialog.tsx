@@ -1,15 +1,15 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@starter/ui/components/shadcn/alert-dialog';
+import { Button, buttonVariants } from '@starter/ui/components/shadcn/button';
 import { Input } from '@starter/ui/components/shadcn/input';
 import { Label } from '@starter/ui/components/shadcn/label';
+import {
+  ResponsiveDialog,
+  ResponsiveDialogClose,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from '@starter/ui/components/shadcn/responsive-dialog';
 import { useForm } from '@tanstack/react-form';
 import { Check, Copy } from 'lucide-react';
 import { useState } from 'react';
@@ -57,7 +57,8 @@ export const DeleteAccountDialog = ({
   };
 
   return (
-    <AlertDialog
+    <ResponsiveDialog
+      dismissible={false}
       open={open}
       onOpenChange={(newOpen) => {
         if (!isDeleting) {
@@ -69,14 +70,14 @@ export const DeleteAccountDialog = ({
         }
       }}
     >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete Account</AlertDialogTitle>
-          <AlertDialogDescription>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Delete Account</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             This action cannot be undone. This will permanently delete your
             account and remove all your data from our servers.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <div className="space-y-3 py-4">
           <Label
@@ -112,21 +113,26 @@ export const DeleteAccountDialog = ({
           </form.Field>
         </div>
 
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+        <ResponsiveDialogFooter>
+          <ResponsiveDialogClose
+            disabled={isDeleting}
+            className={buttonVariants({ variant: 'outline' })}
+          >
+            Cancel
+          </ResponsiveDialogClose>
           <form.Subscribe selector={(state) => state.values.confirmation}>
             {(confirmation) => (
-              <AlertDialogAction
+              <Button
                 onClick={handleConfirm}
                 disabled={confirmation !== CONFIRM_PHRASE || isDeleting}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:bg-muted disabled:text-muted-foreground"
               >
                 {isDeleting ? 'Deleting...' : 'Delete Account'}
-              </AlertDialogAction>
+              </Button>
             )}
           </form.Subscribe>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+        </ResponsiveDialogFooter>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 };

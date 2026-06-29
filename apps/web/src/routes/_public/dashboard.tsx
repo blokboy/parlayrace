@@ -1,10 +1,10 @@
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@starter/ui/components/shadcn/dialog';
+  ResponsiveDialog,
+  ResponsiveDialogClose,
+  ResponsiveDialogContent,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from '@starter/ui/components/shadcn/responsive-dialog';
 import { Skeleton } from '@starter/ui/components/shadcn/skeleton';
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -1095,7 +1095,7 @@ const DashboardPage = () => {
         )}
       </div>
 
-      <Dialog
+      <ResponsiveDialog
         open={selectedTrade !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -1103,24 +1103,24 @@ const DashboardPage = () => {
           }
         }}
       >
-        <DialogContent
+        <ResponsiveDialogContent
           showCloseButton={false}
           className="max-w-md border-violet-200 bg-white"
         >
-          <DialogHeader>
-            <DialogTitle className="text-violet-950">
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle className="text-violet-950">
               {selectedTrade?.selectionLabel ?? 'Selection'}
-            </DialogTitle>
+            </ResponsiveDialogTitle>
             <p className="text-sm text-violet-800">
               {selectedTrade ? selectedTrade.matchup : 'Loading selection...'}
             </p>
-            <DialogClose
+            <ResponsiveDialogClose
               aria-label="Close trade modal"
               className="absolute top-4 right-4 rounded-full border border-violet-200 bg-white px-3 py-1 font-semibold text-violet-700 text-xs transition hover:border-violet-300 hover:bg-violet-50"
             >
               Close
-            </DialogClose>
-          </DialogHeader>
+            </ResponsiveDialogClose>
+          </ResponsiveDialogHeader>
 
           <div className="space-y-4">
             <p className="text-sm text-violet-800">
@@ -1233,8 +1233,8 @@ const DashboardPage = () => {
               </div>
             )}
           </div>
-        </DialogContent>
-      </Dialog>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
     </main>
   );
 };
