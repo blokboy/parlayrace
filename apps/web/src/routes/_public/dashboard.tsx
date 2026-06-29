@@ -145,6 +145,7 @@ type PaperPosition = {
   line?: number;
   comboMarketId?: string;
   comboOutcomeLabel?: string;
+  parentPositionId?: string;
 };
 
 type PaperPortfolioState = {

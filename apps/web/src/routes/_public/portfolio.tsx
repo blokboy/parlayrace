@@ -49,6 +49,8 @@ type PaperPosition = {
   // via /api/markets/<sourceEventId>/combos.
   comboMarketId?: string;
   comboOutcomeLabel?: string;
+  // Combo bets render nested under the moneyline position they were added to.
+  parentPositionId?: string;
 };
 
 type PaperPortfolioState = {
@@ -953,6 +955,26 @@ const PortfolioPage = () => {
     [portfolioState.positions]
   );
 
+  // Top-level cards are the moneyline bets; spread/total bets render nested
+  // inside the card of the moneyline position they were added to.
+  const openMoneylinePositions = useMemo(
+    () => openPositions.filter((position) => !position.comboMarketId),
+    [openPositions]
+  );
+
+  const comboPositionsByParent = useMemo(() => {
+    const map = new Map<string, PaperPosition[]>();
+    for (const position of openPositions) {
+      if (!position.parentPositionId) {
+        continue;
+      }
+      const list = map.get(position.parentPositionId) ?? [];
+      list.push(position);
+      map.set(position.parentPositionId, list);
+    }
+    return map;
+  }, [openPositions]);
+
   useEffect(() => {
     if (openPositions.length === 0) {
       setPositionCurrentPricesById({});
@@ -1636,6 +1658,7 @@ const PortfolioPage = () => {
       line: option.line,
       comboMarketId: option.sourceMarketId,
       comboOutcomeLabel: option.outcomeLabel,
+      parentPositionId: position.id,
     };
 
     const nextState: PaperPortfolioState = {
@@ -1865,13 +1888,13 @@ const PortfolioPage = () => {
                 </div>
               ) : null}
 
-              {openPositions.length === 0 ? (
+              {openMoneylinePositions.length === 0 ? (
                 <div className="rounded-lg border border-gray-300 border-dashed bg-white p-10 text-center text-gray-500">
                   No open paper trades yet.
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {openPositions.map((position) => (
+                  {openMoneylinePositions.map((position) => (
                     <article
                       key={position.id}
                       className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
@@ -1881,60 +1904,47 @@ const PortfolioPage = () => {
                       </h3>
 
                       <div className="mt-3 space-y-2 text-sm">
-                        {position.comboMarketId ? (
-                          <div className="flex flex-wrap items-center gap-2 text-gray-700">
-                            <span className="font-semibold text-gray-900">
-                              {position.optionLabel}
-                            </span>
-                            <span className="inline-flex rounded-full border border-indigo-200 bg-white px-2.5 py-1 font-semibold text-indigo-700 text-xs uppercase tracking-wide">
-                              {position.betType === 'spread'
-                                ? 'Spread'
-                                : 'Total'}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap items-center gap-2 text-gray-700">
-                            {position.side !== 'draw' ? (
-                              teamBrandingByName[
-                                position.side === 'home'
-                                  ? position.homeTeam
-                                  : position.awayTeam
-                              ]?.logo ? (
-                                <img
-                                  src={
-                                    teamBrandingByName[
-                                      position.side === 'home'
-                                        ? position.homeTeam
-                                        : position.awayTeam
-                                    ]?.logo
-                                  }
-                                  alt=""
-                                  className="h-6 w-6 object-cover"
-                                />
-                              ) : (
-                                <span>
-                                  {countryNameToFlag(
+                        <div className="flex flex-wrap items-center gap-2 text-gray-700">
+                          {position.side !== 'draw' ? (
+                            teamBrandingByName[
+                              position.side === 'home'
+                                ? position.homeTeam
+                                : position.awayTeam
+                            ]?.logo ? (
+                              <img
+                                src={
+                                  teamBrandingByName[
                                     position.side === 'home'
                                       ? position.homeTeam
                                       : position.awayTeam
-                                  )}
-                                </span>
-                              )
-                            ) : null}
-                            <span className="font-semibold text-gray-900">
-                              {position.side === 'home'
-                                ? position.homeTeam
-                                : position.side === 'away'
-                                  ? position.awayTeam
-                                  : 'Draw'}
-                            </span>
-                            <span
-                              className={`inline-flex rounded-full border px-2.5 py-1 font-semibold text-xs ${position.buySide === 'YES' ? 'border-emerald-200 bg-white text-emerald-700' : 'border-rose-200 bg-white text-rose-700'}`}
-                            >
-                              {position.buySide}
-                            </span>
-                          </div>
-                        )}
+                                  ]?.logo
+                                }
+                                alt=""
+                                className="h-6 w-6 object-cover"
+                              />
+                            ) : (
+                              <span>
+                                {countryNameToFlag(
+                                  position.side === 'home'
+                                    ? position.homeTeam
+                                    : position.awayTeam
+                                )}
+                              </span>
+                            )
+                          ) : null}
+                          <span className="font-semibold text-gray-900">
+                            {position.side === 'home'
+                              ? position.homeTeam
+                              : position.side === 'away'
+                                ? position.awayTeam
+                                : 'Draw'}
+                          </span>
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 font-semibold text-xs ${position.buySide === 'YES' ? 'border-emerald-200 bg-white text-emerald-700' : 'border-rose-200 bg-white text-rose-700'}`}
+                          >
+                            {position.buySide}
+                          </span>
+                        </div>
 
                         <div className="grid grid-cols-2 gap-3">
                           <div className="rounded-lg border border-violet-100 bg-white p-2">
@@ -1980,6 +1990,70 @@ const PortfolioPage = () => {
                           </div>
                         </div>
                       </div>
+
+                      {(() => {
+                        const comboChildren =
+                          comboPositionsByParent.get(position.id) ?? [];
+                        if (comboChildren.length === 0) {
+                          return null;
+                        }
+                        return (
+                          <div className="mt-3 space-y-2">
+                            {comboChildren.map((combo) => (
+                              <div
+                                key={combo.id}
+                                className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-2.5"
+                              >
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-semibold text-gray-900 text-xs">
+                                    {combo.optionLabel}
+                                  </span>
+                                  <span className="inline-flex rounded-full border border-indigo-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase tracking-wide">
+                                    {combo.betType === 'spread'
+                                      ? 'Spread'
+                                      : 'Total'}
+                                  </span>
+                                </div>
+                                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                                  <span className="text-gray-600">
+                                    Stake{' '}
+                                    <span className="font-semibold text-gray-900">
+                                      ${combo.stake.toFixed(2)}
+                                    </span>
+                                  </span>
+                                  <span className="text-gray-600">
+                                    Shares{' '}
+                                    <span className="font-semibold text-gray-900">
+                                      {combo.quantity.toFixed(2)}
+                                    </span>
+                                  </span>
+                                  <span className="text-gray-600">
+                                    Entry{' '}
+                                    <span className="font-semibold text-gray-900">
+                                      ${combo.entryPrice.toFixed(2)}
+                                    </span>
+                                  </span>
+                                  <span className="text-gray-600">
+                                    Value{' '}
+                                    {positionCurrentPricesById[combo.id] ===
+                                    undefined ? (
+                                      <Skeleton className="inline-block h-3 w-10 rounded bg-gray-100 align-middle" />
+                                    ) : (
+                                      <span className="font-semibold text-gray-900">
+                                        $
+                                        {roundToCents(
+                                          combo.quantity *
+                                            getPositionCurrentPrice(combo)
+                                        ).toFixed(2)}
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
 
                       <div className="mt-4 border-gray-100 border-t pt-3">
                         {positionCategoryById[position.id] === 'mlb-games' &&
