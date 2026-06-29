@@ -1122,8 +1122,8 @@ const DashboardPage = () => {
             </ResponsiveDialogClose>
           </ResponsiveDialogHeader>
 
-          <div className="space-y-4">
-            <p className="text-sm text-violet-800">
+          <div className="space-y-4 max-md:space-y-3">
+            <p className="text-sm text-violet-800 max-md:text-xs">
               Choose your side and paper stake for this selection.
             </p>
 
@@ -1182,7 +1182,7 @@ const DashboardPage = () => {
                       <button
                         type="button"
                         onClick={() => setPickSide('YES')}
-                        className={`rounded-full border px-3 py-2 font-semibold text-sm transition ${pickSide === 'YES' ? 'border-emerald-400 bg-emerald-500 text-white' : '!bg-white hover:!bg-emerald-50 border-emerald-300 text-emerald-700'}`}
+                        className={`rounded-full border px-3 py-2 font-semibold text-sm max-md:py-1.5 transition${pickSide === 'YES' ? 'border-emerald-400 bg-emerald-500 text-white' : '!bg-white hover:!bg-emerald-50 border-emerald-300 text-emerald-700'}`}
                       >
                         YES{' '}
                         {marketDetail
@@ -1192,7 +1192,7 @@ const DashboardPage = () => {
                       <button
                         type="button"
                         onClick={() => setPickSide('NO')}
-                        className={`rounded-full border px-3 py-2 font-semibold text-sm transition ${pickSide === 'NO' ? 'border-rose-400 bg-rose-500 text-white' : '!bg-white hover:!bg-rose-50 border-rose-300 text-rose-700'}`}
+                        className={`rounded-full border px-3 py-2 font-semibold text-sm max-md:py-1.5 transition${pickSide === 'NO' ? 'border-rose-400 bg-rose-500 text-white' : '!bg-white hover:!bg-rose-50 border-rose-300 text-rose-700'}`}
                       >
                         NO{' '}
                         {marketDetail
@@ -1221,7 +1221,7 @@ const DashboardPage = () => {
                     color: selectedPalette.color,
                     borderColor: selectedPalette.border,
                   }}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50 max-md:py-1.5"
                 >
                   <span>
                     {isDrawTrade

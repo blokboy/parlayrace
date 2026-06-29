@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 
 import { useIsMobile } from '../../hooks/use-mobile';
+import { cn } from '../../lib/utils';
 import {
   Dialog,
   DialogClose,
@@ -92,7 +93,19 @@ function ResponsiveDialogContent({
         className={className}
         {...props}
       >
-        {children}
+        {/*
+         * The whole body is marked data-vaul-no-drag so interactive controls
+         * (sliders, buttons) receive their own pointer events instead of vaul
+         * hijacking them for drag-to-dismiss; the drag handle (rendered by
+         * DrawerContent above this node) stays draggable. px/pb give the body
+         * the breathing room the desktop Dialog got from its p-6.
+         */}
+        <div
+          className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pt-1 pb-5"
+          data-vaul-no-drag
+        >
+          {children}
+        </div>
       </DrawerContent>
     );
   }
@@ -115,19 +128,47 @@ function ResponsiveDialogContent({
 }
 
 function ResponsiveDialogHeader({
+  className,
   ...props
 }: React.ComponentProps<typeof DialogHeader>) {
   const { isMobile } = useResponsiveDialog();
-  const Comp = isMobile ? DrawerHeader : DialogHeader;
-  return <Comp {...props} />;
+  // The body wrapper already supplies horizontal padding on mobile, so strip
+  // the drawer header's own px/pt to keep the inset uniform.
+  if (isMobile) {
+    return (
+      <DrawerHeader
+        className={cn('px-0 pt-0', className)}
+        {...props}
+      />
+    );
+  }
+  return (
+    <DialogHeader
+      className={className}
+      {...props}
+    />
+  );
 }
 
 function ResponsiveDialogFooter({
+  className,
   ...props
 }: React.ComponentProps<typeof DialogFooter>) {
   const { isMobile } = useResponsiveDialog();
-  const Comp = isMobile ? DrawerFooter : DialogFooter;
-  return <Comp {...props} />;
+  if (isMobile) {
+    return (
+      <DrawerFooter
+        className={cn('px-0 pb-0', className)}
+        {...props}
+      />
+    );
+  }
+  return (
+    <DialogFooter
+      className={className}
+      {...props}
+    />
+  );
 }
 
 function ResponsiveDialogTitle({

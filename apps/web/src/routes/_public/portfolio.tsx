@@ -1,4 +1,11 @@
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@starter/ui/components/shadcn/dialog';
+import {
   ResponsiveDialog,
   ResponsiveDialogClose,
   ResponsiveDialogContent,
@@ -1990,7 +1997,7 @@ const PortfolioPage = () => {
         </div>
       ) : null}
 
-      <ResponsiveDialog
+      <Dialog
         open={selectedParlayTeam !== null}
         onOpenChange={(open) => {
           if (!open && !committingShare) {
@@ -2001,25 +2008,25 @@ const PortfolioPage = () => {
           }
         }}
       >
-        <ResponsiveDialogContent
+        <DialogContent
           showCloseButton={false}
           className="max-w-xl border-violet-200 bg-white"
         >
-          <ResponsiveDialogHeader>
-            <ResponsiveDialogTitle className="text-violet-950">
+          <DialogHeader>
+            <DialogTitle className="text-violet-950">
               {selectedParlayTeam?.name ?? 'Parlay Team'}
-            </ResponsiveDialogTitle>
+            </DialogTitle>
             <p className="text-sm text-violet-800">
               View team details and add shares from your open positions.
             </p>
-            <ResponsiveDialogClose
+            <DialogClose
               aria-label="Close parlay team modal"
               className="absolute top-4 right-4 rounded-full border border-violet-200 bg-white px-3 py-1 font-semibold text-violet-700 text-xs transition hover:border-violet-300 hover:bg-violet-50"
               disabled={committingShare}
             >
               Close
-            </ResponsiveDialogClose>
-          </ResponsiveDialogHeader>
+            </DialogClose>
+          </DialogHeader>
 
           <div className="space-y-4">
             <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -2379,8 +2386,8 @@ const PortfolioPage = () => {
               </div>
             )}
           </div>
-        </ResponsiveDialogContent>
-      </ResponsiveDialog>
+        </DialogContent>
+      </Dialog>
 
       <ResponsiveDialog
         open={sellPosition !== null}
@@ -2416,8 +2423,8 @@ const PortfolioPage = () => {
             </ResponsiveDialogClose>
           </ResponsiveDialogHeader>
 
-          <div className="space-y-4">
-            <p className="text-sm text-violet-800">
+          <div className="space-y-4 max-md:space-y-3">
+            <p className="text-sm text-violet-800 max-md:text-xs">
               Choose how many shares to sell from this position.
             </p>
 
@@ -2483,7 +2490,7 @@ const PortfolioPage = () => {
                     color: sellPalette.color,
                     borderColor: sellPalette.border,
                   }}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50 max-md:py-1.5"
                 >
                   <span>Confirm SELL</span>
                   <span>${selectedSellPrice.toFixed(2)}</span>
