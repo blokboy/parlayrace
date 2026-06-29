@@ -349,6 +349,41 @@ export const parlayTeamParlayClaim = pgTable(
   })
 ).enableRLS();
 
+// A spread/total combo bought against a parlay leg (the leg's MLB game). Locked
+// into the parlay: the buyer's cash funds it and it rolls/settles with the leg.
+export const parlayTeamLegCombo = pgTable('parlay_team_leg_combo', {
+  id: text()
+    .primaryKey()
+    .$defaultFn(() => uuid()),
+  parlayId: text()
+    .notNull()
+    .references(() => parlayTeamParlay.id, { onDelete: 'cascade' }),
+  teamId: text()
+    .notNull()
+    .references(() => parlayTeam.id, { onDelete: 'cascade' }),
+  legShareId: text()
+    .notNull()
+    .references(() => parlayTeamParlayShare.id, { onDelete: 'cascade' }),
+  addedByUserId: text()
+    .notNull()
+    .references(() => userProfile.id, { onDelete: 'cascade' }),
+  // The leg's persisted sourceEventId, used to re-price the combo from Gamma.
+  sourceEventId: text().notNull(),
+  comboMarketId: text().notNull(),
+  comboOutcomeLabel: text().notNull(),
+  optionLabel: text().notNull(),
+  betType: text().notNull(),
+  line: real(),
+  shares: real().notNull(),
+  stake: real().notNull(),
+  entryPrice: real().notNull(),
+  // Mirrors the parent leg's lifecycle: PENDING → WON/LOST/ROLLED_OVER.
+  result: text(),
+  resolvedAt: timestamp(),
+  resolvedPrice: real(),
+  createdAt: timestamp().defaultNow().notNull(),
+}).enableRLS();
+
 export const providerSyncRun = pgTable('provider_sync_run', {
   id: text()
     .primaryKey()

@@ -80,14 +80,32 @@ type TeamCommittedLeg = {
   kickoff: string;
   homeTeam: string;
   awayTeam: string;
+  category: string | null;
   positionSide: PositionSide;
   buySide: BuySide;
   placedAt: string;
   result: 'PENDING' | 'WON' | 'LOST' | 'ROLLED_OVER';
+  combos: TeamLegCombo[];
   principalShares: number;
   rolledInShares: number;
   effectiveShares: number;
   resolvedAt: string | null;
+};
+
+type TeamLegCombo = {
+  id: string;
+  addedByUserId: string;
+  addedByUsername: string;
+  optionLabel: string;
+  betType: string;
+  line: number | null;
+  sourceEventId: string;
+  comboMarketId: string;
+  comboOutcomeLabel: string;
+  shares: number;
+  stake: number;
+  entryPrice: number;
+  result: 'PENDING' | 'WON' | 'LOST' | 'ROLLED_OVER';
 };
 
 type ParlayTeam = {
@@ -136,6 +154,23 @@ type ComboOptionsPayload = {
   spreads: ComboOption[];
   totals: ComboOption[];
 };
+
+// A combo can be bought against a personal ML position OR a team parlay leg.
+type ComboSource =
+  | { kind: 'position'; position: PaperPosition }
+  | {
+      kind: 'leg';
+      teamId: string;
+      legId: string;
+      sourceEventId: string;
+      matchup: string;
+    };
+
+const comboSourceEventId = (source: ComboSource): string =>
+  source.kind === 'position' ? source.position.marketId : source.sourceEventId;
+
+const comboSourceMatchup = (source: ComboSource): string =>
+  source.kind === 'position' ? source.position.matchup : source.matchup;
 
 type TeamLegLiveMetrics = {
   currentPrice: number | null;
@@ -838,8 +873,9 @@ const PortfolioPage = () => {
   >({});
   // The Spreads/Totals option picker, shown as a bottom sheet on mobile. Spread
   // and total are added independently — open one, add it, then open the other.
+  // The source is either a personal ML position or a team parlay leg.
   const [comboPicker, setComboPicker] = useState<{
-    position: PaperPosition;
+    source: ComboSource;
     type: ComboMarketType;
   } | null>(null);
   const [comboOptionsByEvent, setComboOptionsByEvent] = useState<
@@ -850,7 +886,7 @@ const PortfolioPage = () => {
   >({});
   // The combo option the user is staking on (drives the add-bet sheet).
   const [comboBet, setComboBet] = useState<{
-    position: PaperPosition;
+    source: ComboSource;
     option: ComboOption;
   } | null>(null);
   const [comboStake, setComboStake] = useState(25);
@@ -1071,6 +1107,25 @@ const PortfolioPage = () => {
 
   const getPositionCurrentPrice = (position: PaperPosition) => {
     return positionCurrentPricesById[position.id] ?? position.entryPrice;
+  };
+
+  // Live price of a leg combo from the cached game options (null until loaded).
+  const legComboCurrentPrice = (
+    leg: TeamCommittedLeg,
+    combo: TeamLegCombo
+  ): number | null => {
+    const options = leg.marketId
+      ? comboOptionsByEvent[leg.marketId]
+      : undefined;
+    if (!options) {
+      return null;
+    }
+    const match = [...options.spreads, ...options.totals].find(
+      (option) =>
+        option.sourceMarketId === combo.comboMarketId &&
+        option.outcomeLabel === combo.comboOutcomeLabel
+    );
+    return match ? match.price : null;
   };
 
   const deployedCapital = useMemo(
@@ -1353,6 +1408,33 @@ const PortfolioPage = () => {
     };
   }, [selectedParlayTeam]);
 
+  // Prefetch combo options for legs that have combos, so their live Value shows.
+  useEffect(() => {
+    if (!selectedParlayTeam) {
+      return;
+    }
+    const eventIds = Array.from(
+      new Set(
+        selectedParlayTeam.committedLegs
+          .filter((leg) => leg.combos.length > 0 && leg.marketId)
+          .map((leg) => leg.marketId as string)
+      )
+    );
+    for (const eventId of eventIds) {
+      if (comboOptionsByEvent[eventId] || loadingCombosByEvent[eventId]) {
+        continue;
+      }
+      setLoadingCombosByEvent((map) => ({ ...map, [eventId]: true }));
+      void fetchComboOptions(eventId)
+        .then((data) =>
+          setComboOptionsByEvent((map) => ({ ...map, [eventId]: data }))
+        )
+        .finally(() =>
+          setLoadingCombosByEvent((map) => ({ ...map, [eventId]: false }))
+        );
+    }
+  }, [selectedParlayTeam, comboOptionsByEvent, loadingCombosByEvent]);
+
   const createTeamFromModal = async () => {
     const name = teamName.trim();
     if (!name || creatingTeam) {
@@ -1586,11 +1668,12 @@ const PortfolioPage = () => {
   };
 
   // Open the Spreads/Totals picker (bottom sheet on mobile), lazily fetching the
-  // game's options the first time it's opened.
-  const openComboPicker = (position: PaperPosition, type: ComboMarketType) => {
-    setComboPicker({ position, type });
+  // game's options the first time it's opened. Source = a personal ML position
+  // or a team parlay leg.
+  const openComboPicker = (source: ComboSource, type: ComboMarketType) => {
+    setComboPicker({ source, type });
 
-    const eventId = position.marketId;
+    const eventId = comboSourceEventId(source);
     if (comboOptionsByEvent[eventId] || loadingCombosByEvent[eventId]) {
       return;
     }
@@ -1605,8 +1688,8 @@ const PortfolioPage = () => {
       );
   };
 
-  const openComboBet = (position: PaperPosition, option: ComboOption) => {
-    setComboBet({ position, option });
+  const openComboBet = (source: ComboSource, option: ComboOption) => {
+    setComboBet({ source, option });
     setComboStake(Math.max(0, Math.min(25, Math.floor(portfolioState.cash))));
   };
 
@@ -1615,13 +1698,62 @@ const PortfolioPage = () => {
       return;
     }
 
-    const { position, option } = comboBet;
+    const { source, option } = comboBet;
     if (option.price <= 0 || comboStake <= 0) {
       return;
     }
 
     setPlacingCombo(true);
 
+    // Team parlay leg → buy server-side; funds lock into the parlay.
+    if (source.kind === 'leg') {
+      const response = await fetch('/api/parlay-teams', {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'buy-leg-combo',
+          teamId: source.teamId,
+          legId: source.legId,
+          comboMarketId: option.sourceMarketId,
+          comboOutcomeLabel: option.outcomeLabel,
+          optionLabel: option.label,
+          betType: option.marketType,
+          line: option.line,
+          stake: comboStake,
+        }),
+      });
+
+      setPlacingCombo(false);
+
+      if (!response.ok) {
+        setTeamModalFeedback('Unable to add this combo to the leg.');
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        team?: ParlayTeam | null;
+        teams?: ParlayTeam[];
+      };
+      if (payload.teams) {
+        setParlayTeams(payload.teams);
+      }
+      if (payload.team) {
+        setSelectedParlayTeam(payload.team);
+      }
+      // The buyer's cash was debited server-side — refresh it.
+      const refreshed = await fetchPortfolioStateForUser();
+      if (refreshed) {
+        setPortfolioState(refreshed);
+      }
+      setComboBet(null);
+      return;
+    }
+
+    // Personal ML position → create a sellable combo position (parentPositionId).
+    const position = source.position;
     const portfolio = await fetchPortfolioStateForUser();
     if (!portfolio) {
       setPlacingCombo(false);
@@ -1716,35 +1848,57 @@ const PortfolioPage = () => {
       return;
     }
 
-    const proceeds = roundToCents(effectiveSellShares * selectedSellPrice);
+    const mlProceeds = roundToCents(effectiveSellShares * selectedSellPrice);
     const remainingShares = roundToCents(
       sellPosition.quantity - effectiveSellShares
     );
 
-    const nextPositions = portfolioState.positions.map((position) => {
-      if (position.id !== sellPosition.id) {
-        return position;
-      }
+    // Selling the ML bet liquidates ALL its open combos at current value and
+    // folds that into the proceeds; the combos are removed from the portfolio.
+    const comboChildren = portfolioState.positions.filter(
+      (position) =>
+        position.parentPositionId === sellPosition.id &&
+        position.comboMarketId &&
+        position.status === 'OPEN'
+    );
+    const comboProceeds = roundToCents(
+      comboChildren.reduce(
+        (sum, combo) =>
+          sum +
+          combo.quantity *
+            (positionCurrentPricesById[combo.id] ?? combo.entryPrice),
+        0
+      )
+    );
+    const comboChildIds = new Set(comboChildren.map((combo) => combo.id));
+    const proceeds = roundToCents(mlProceeds + comboProceeds);
 
-      if (remainingShares <= 0) {
+    const nextPositions = portfolioState.positions
+      .filter((position) => !comboChildIds.has(position.id))
+      .map((position) => {
+        if (position.id !== sellPosition.id) {
+          return position;
+        }
+
+        if (remainingShares <= 0) {
+          return {
+            ...position,
+            quantity: 0,
+            stake: 0,
+            status: 'CLOSED' as const,
+            closedAt: new Date().toISOString(),
+            closeValue: proceeds,
+          };
+        }
+
+        const ratio = remainingShares / position.quantity;
+
         return {
           ...position,
-          quantity: 0,
-          stake: 0,
-          status: 'CLOSED' as const,
-          closedAt: new Date().toISOString(),
-          closeValue: proceeds,
+          quantity: remainingShares,
+          stake: roundToCents(position.stake * ratio),
         };
-      }
-
-      const ratio = remainingShares / position.quantity;
-
-      return {
-        ...position,
-        quantity: remainingShares,
-        stake: roundToCents(position.stake * ratio),
-      };
-    });
+      });
 
     const nextState: PaperPortfolioState = {
       cash: roundToCents(portfolioState.cash + proceeds),
@@ -2063,7 +2217,12 @@ const PortfolioPage = () => {
                               <button
                                 key={type}
                                 type="button"
-                                onClick={() => openComboPicker(position, type)}
+                                onClick={() =>
+                                  openComboPicker(
+                                    { kind: 'position', position },
+                                    type
+                                  )
+                                }
                                 className="inline-flex rounded-full border border-gray-200 bg-white px-3 py-1 font-semibold text-gray-600 text-xs transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
                               >
                                 {type === 'spread' ? 'Spreads' : 'Totals'}
@@ -2505,15 +2664,28 @@ const PortfolioPage = () => {
                               <span className="inline-flex rounded-full border border-amber-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-amber-800 uppercase tracking-wide">
                                 Shares
                               </span>
-                              <p className="mt-1 font-semibold text-gray-900 text-sm">
-                                {leg.effectiveShares.toFixed(2)}
-                              </p>
-                              {leg.rolledInShares > 0 ? (
-                                <p className="text-[10px] text-gray-500">
-                                  {leg.principalShares.toFixed(2)} principal +{' '}
-                                  {leg.rolledInShares.toFixed(2)} rolled
-                                </p>
-                              ) : null}
+                              {leg.result === 'ROLLED_OVER' ? (
+                                <>
+                                  <p className="mt-1 font-semibold text-gray-900 text-sm">
+                                    0.00
+                                  </p>
+                                  <p className="text-[10px] text-gray-500">
+                                    {leg.effectiveShares.toFixed(2)} rolled out
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="mt-1 font-semibold text-gray-900 text-sm">
+                                    {leg.effectiveShares.toFixed(2)}
+                                  </p>
+                                  {leg.rolledInShares > 0 ? (
+                                    <p className="text-[10px] text-gray-500">
+                                      {leg.principalShares.toFixed(2)} principal
+                                      + {leg.rolledInShares.toFixed(2)} rolled
+                                    </p>
+                                  ) : null}
+                                </>
+                              )}
                             </div>
                             <div className="rounded-lg border border-blue-100 bg-white p-2">
                               <span className="inline-flex rounded-full border border-blue-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-blue-800 uppercase tracking-wide">
@@ -2527,7 +2699,11 @@ const PortfolioPage = () => {
                               <span className="inline-flex rounded-full border border-violet-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-violet-800 uppercase tracking-wide">
                                 Current Price
                               </span>
-                              {metrics === undefined ? (
+                              {leg.result === 'ROLLED_OVER' ? (
+                                <p className="mt-1 font-semibold text-gray-400 text-sm">
+                                  --
+                                </p>
+                              ) : metrics === undefined ? (
                                 <Skeleton className="mt-1 h-5 w-12 rounded bg-gray-100" />
                               ) : (
                                 <p className="mt-1 font-semibold text-gray-900 text-sm">
@@ -2540,9 +2716,15 @@ const PortfolioPage = () => {
                             </div>
                             <div className="rounded-lg border border-emerald-100 bg-white p-2">
                               <span className="inline-flex rounded-full border border-emerald-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-emerald-800 uppercase tracking-wide">
-                                Expected Payoff
+                                {leg.result === 'ROLLED_OVER'
+                                  ? 'Rolled Out'
+                                  : 'Expected Payoff'}
                               </span>
-                              {metrics === undefined ? (
+                              {leg.result === 'ROLLED_OVER' ? (
+                                <p className="mt-1 font-semibold text-gray-900 text-sm">
+                                  $0.00
+                                </p>
+                              ) : metrics === undefined ? (
                                 <Skeleton className="mt-1 h-5 w-14 rounded bg-gray-100" />
                               ) : (
                                 <p className="mt-1 font-semibold text-gray-900 text-sm">
@@ -2554,6 +2736,92 @@ const PortfolioPage = () => {
                               )}
                             </div>
                           </div>
+
+                          {leg.combos.length > 0 ? (
+                            <div className="mt-2 space-y-1.5">
+                              {leg.combos.map((combo) => {
+                                const price = legComboCurrentPrice(leg, combo);
+                                const value = roundToCents(
+                                  combo.shares * (price ?? combo.entryPrice)
+                                );
+                                return (
+                                  <div
+                                    key={combo.id}
+                                    className="rounded-md border border-indigo-100 bg-indigo-50/40 p-2"
+                                  >
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-semibold text-gray-900 text-xs">
+                                        {combo.optionLabel}
+                                      </span>
+                                      <span className="inline-flex rounded-full border border-indigo-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase tracking-wide">
+                                        {combo.betType === 'spread'
+                                          ? 'Spread'
+                                          : 'Total'}
+                                      </span>
+                                      <span className="inline-flex rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] text-gray-700">
+                                        {combo.addedByUsername}
+                                      </span>
+                                    </div>
+                                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                                      <span className="text-gray-600">
+                                        Stake{' '}
+                                        <span className="font-semibold text-gray-900">
+                                          ${combo.stake.toFixed(2)}
+                                        </span>
+                                      </span>
+                                      <span className="text-gray-600">
+                                        Shares{' '}
+                                        <span className="font-semibold text-gray-900">
+                                          {combo.shares.toFixed(2)}
+                                        </span>
+                                      </span>
+                                      <span className="text-gray-600">
+                                        Entry{' '}
+                                        <span className="font-semibold text-gray-900">
+                                          ${combo.entryPrice.toFixed(2)}
+                                        </span>
+                                      </span>
+                                      <span className="text-gray-600">
+                                        Value{' '}
+                                        <span className="font-semibold text-gray-900">
+                                          ${value.toFixed(2)}
+                                        </span>
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+
+                          {leg.category === 'mlb-games' &&
+                          leg.result === 'PENDING' &&
+                          leg.marketId &&
+                          new Date(leg.kickoff).getTime() > Date.now() ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              {(['spread', 'total'] as const).map((type) => (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={() =>
+                                    openComboPicker(
+                                      {
+                                        kind: 'leg',
+                                        teamId: selectedParlayTeam.id,
+                                        legId: leg.id,
+                                        sourceEventId: leg.marketId as string,
+                                        matchup: leg.cardTitle,
+                                      },
+                                      type
+                                    )
+                                  }
+                                  className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-0.5 font-semibold text-[11px] text-gray-600 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+                                >
+                                  {type === 'spread' ? 'Spreads' : 'Totals'}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -2861,7 +3129,7 @@ const PortfolioPage = () => {
             </ResponsiveDialogTitle>
             <p className="text-sm text-violet-800">
               {comboPicker
-                ? comboPicker.position.matchup
+                ? comboSourceMatchup(comboPicker.source)
                 : 'Loading selection...'}
             </p>
             <ResponsiveDialogClose
@@ -2878,7 +3146,7 @@ const PortfolioPage = () => {
                 return null;
               }
 
-              const eventId = comboPicker.position.marketId;
+              const eventId = comboSourceEventId(comboPicker.source);
               const options = comboOptionsByEvent[eventId];
               const list =
                 comboPicker.type === 'spread'
@@ -2914,7 +3182,7 @@ const PortfolioPage = () => {
                         <button
                           type="button"
                           onClick={() => {
-                            openComboBet(comboPicker.position, option);
+                            openComboBet(comboPicker.source, option);
                             setComboPicker(null);
                           }}
                           className="flex w-full flex-col gap-1 rounded-lg border border-violet-200 bg-white p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50"
@@ -2953,7 +3221,9 @@ const PortfolioPage = () => {
               {comboBet?.option.label}
             </ResponsiveDialogTitle>
             <p className="text-sm text-violet-800">
-              {comboBet ? comboBet.position.matchup : 'Loading selection...'}
+              {comboBet
+                ? comboSourceMatchup(comboBet.source)
+                : 'Loading selection...'}
             </p>
             <ResponsiveDialogClose
               aria-label="Close combo bet modal"

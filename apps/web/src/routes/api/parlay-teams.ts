@@ -4,6 +4,7 @@ import { eq } from '@starter/backend/orm';
 import {
   paperPortfolio,
   parlayTeam,
+  parlayTeamLegCombo,
   parlayTeamMember,
   parlayTeamParlay,
   parlayTeamParlayClaim,
@@ -12,6 +13,7 @@ import {
   userProfile,
 } from '@starter/backend/schema';
 import { createFileRoute } from '@tanstack/react-router';
+import { fetchEventCombos, getComboPrice } from '@/server/polymarket/combos';
 import { getLegSidePrice } from '@/server/polymarket/prices';
 
 type PositionSide = 'home' | 'draw' | 'away';
@@ -37,6 +39,13 @@ type PaperPosition = {
   createdAt: string;
   closedAt?: string | null;
   closeValue?: number | null;
+  // Spread/total combo bets attached to this position (see portfolio.tsx).
+  betType?: 'moneyline' | 'spread' | 'total';
+  optionLabel?: string;
+  line?: number;
+  comboMarketId?: string;
+  comboOutcomeLabel?: string;
+  parentPositionId?: string;
 };
 
 type PaperPortfolioState = {
@@ -47,6 +56,22 @@ type PaperPortfolioState = {
 type TeamMember = {
   id: string;
   username: string;
+};
+
+type LegCombo = {
+  id: string;
+  addedByUserId: string;
+  addedByUsername: string;
+  optionLabel: string;
+  betType: string;
+  line: number | null;
+  sourceEventId: string;
+  comboMarketId: string;
+  comboOutcomeLabel: string;
+  shares: number;
+  stake: number;
+  entryPrice: number;
+  result: LegResolution;
 };
 
 type TeamCommittedLeg = {
@@ -66,10 +91,12 @@ type TeamCommittedLeg = {
   kickoff: string;
   homeTeam: string;
   awayTeam: string;
+  category: string | null;
   positionSide: PositionSide;
   buySide: BuySide;
   placedAt: string;
   result: LegResolution;
+  combos: LegCombo[];
   // Compounding detail: principal vs winnings rolled in from earlier legs.
   principalShares: number;
   rolledInShares: number;
@@ -498,6 +525,54 @@ const creditUserCash = async (userId: string, amount: number) => {
     });
 };
 
+// Remove `amount` from a user's cash. Returns false (no change) when they can't
+// cover it, so callers can reject the buy.
+const debitUserCash = async (
+  userId: string,
+  amount: number
+): Promise<boolean> => {
+  const roundedAmount = roundToCents(amount);
+  if (roundedAmount <= 0) {
+    return false;
+  }
+
+  const row = await db.query.paperPortfolio.findFirst({
+    where: (table, { eq: equals }) => equals(table.userId, userId),
+    columns: { cashBalance: true, positions: true },
+  });
+
+  const current = normalizePortfolioState({
+    cash: row?.cashBalance,
+    positions: Array.isArray(row?.positions)
+      ? (row.positions as PaperPosition[])
+      : [],
+  });
+
+  if (current.cash < roundedAmount) {
+    return false;
+  }
+
+  const nextCash = roundToCents(current.cash - roundedAmount);
+
+  await db
+    .insert(paperPortfolio)
+    .values({
+      userId,
+      cashBalance: nextCash,
+      positions: current.positions,
+    })
+    .onConflictDoUpdate({
+      target: paperPortfolio.userId,
+      set: {
+        cashBalance: nextCash,
+        positions: current.positions,
+        updatedAt: new Date(),
+      },
+    });
+
+  return true;
+};
+
 const getWinner = (status: LiveStatusPayload): PositionSide | null => {
   if (status.homeScore === null || status.awayScore === null) {
     return null;
@@ -591,36 +666,115 @@ const syncParlayStates = async (teamIds: string[]) => {
     return;
   }
 
-  const [parlays, shares, memberships, blokboyProfile, rolloverRows] =
-    await Promise.all([
-      db.query.parlayTeamParlay.findMany({
-        where: (table, { inArray }) => inArray(table.teamId, teamIds),
-      }),
-      db.query.parlayTeamParlayShare.findMany({
-        where: (table, { inArray }) => inArray(table.teamId, teamIds),
-      }),
-      db.query.parlayTeamMember.findMany({
-        where: (table, { inArray }) => inArray(table.teamId, teamIds),
-        columns: {
-          userId: true,
-        },
-      }),
-      db.query.userProfile.findFirst({
-        where: (table, { eq: equals }) =>
-          equals(table.username, BLOKBOY_USERNAME),
-        columns: {
-          id: true,
-        },
-      }),
-      db.query.parlayTeamParlayRollover.findMany({
-        where: (table, { inArray }) => inArray(table.teamId, teamIds),
-      }),
-    ]);
+  const [
+    parlays,
+    shares,
+    memberships,
+    blokboyProfile,
+    rolloverRows,
+    legCombos,
+  ] = await Promise.all([
+    db.query.parlayTeamParlay.findMany({
+      where: (table, { inArray }) => inArray(table.teamId, teamIds),
+    }),
+    db.query.parlayTeamParlayShare.findMany({
+      where: (table, { inArray }) => inArray(table.teamId, teamIds),
+    }),
+    db.query.parlayTeamMember.findMany({
+      where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      columns: {
+        userId: true,
+      },
+    }),
+    db.query.userProfile.findFirst({
+      where: (table, { eq: equals }) =>
+        equals(table.username, BLOKBOY_USERNAME),
+      columns: {
+        id: true,
+      },
+    }),
+    db.query.parlayTeamParlayRollover.findMany({
+      where: (table, { inArray }) => inArray(table.teamId, teamIds),
+    }),
+    db.query.parlayTeamLegCombo.findMany({
+      where: (table, { inArray }) => inArray(table.teamId, teamIds),
+    }),
+  ]);
 
   const activeParlays = parlays.filter((parlay) => parlay.status === 'ACTIVE');
   if (activeParlays.length === 0) {
     return;
   }
+
+  // Price every still-pending combo once (one Gamma fetch per event) so leg
+  // values below can fold in their combos cheaply. Post-game the price is the
+  // settled ~1/0, so this doubles as combo settlement.
+  const comboPriceById = new Map<string, number>();
+  const pendingCombos = legCombos.filter(
+    (combo) =>
+      combo.result !== 'WON' &&
+      combo.result !== 'LOST' &&
+      combo.result !== 'ROLLED_OVER'
+  );
+  for (const eventId of new Set(pendingCombos.map((c) => c.sourceEventId))) {
+    const options = await fetchEventCombos(eventId);
+    const priceByKey = new Map(
+      [...options.spreads, ...options.totals].map((option) => [
+        `${option.sourceMarketId}:${option.outcomeLabel}`,
+        option.price,
+      ])
+    );
+    for (const combo of pendingCombos.filter(
+      (c) => c.sourceEventId === eventId
+    )) {
+      const price = priceByKey.get(
+        `${combo.comboMarketId}:${combo.comboOutcomeLabel}`
+      );
+      if (typeof price === 'number') {
+        comboPriceById.set(combo.id, price);
+      }
+    }
+  }
+
+  // Dollar value of a leg's pending combos at current/settled prices.
+  const legComboValue = (legShareId: string): number =>
+    roundToCents(
+      legCombos
+        .filter(
+          (combo) =>
+            combo.legShareId === legShareId &&
+            combo.result !== 'WON' &&
+            combo.result !== 'LOST' &&
+            combo.result !== 'ROLLED_OVER'
+        )
+        .reduce(
+          (sum, combo) =>
+            sum + combo.shares * (comboPriceById.get(combo.id) ?? 0),
+          0
+        )
+    );
+
+  // Stamp a leg's pending combos with a terminal result + settle price.
+  const settleLegCombos = async (legShareId: string, result: LegResolution) => {
+    const targets = legCombos.filter(
+      (combo) =>
+        combo.legShareId === legShareId &&
+        combo.result !== 'WON' &&
+        combo.result !== 'LOST' &&
+        combo.result !== 'ROLLED_OVER'
+    );
+    for (const combo of targets) {
+      combo.result = result;
+      await db
+        .update(parlayTeamLegCombo)
+        .set({
+          result,
+          resolvedAt: new Date(),
+          resolvedPrice: comboPriceById.get(combo.id) ?? null,
+        })
+        .where(eq(parlayTeamLegCombo.id, combo.id));
+    }
+  };
 
   const userIds = Array.from(
     new Set(memberships.map((membership) => membership.userId))
@@ -787,10 +941,11 @@ const syncParlayStates = async (teamIds: string[]) => {
         continue;
       }
 
-      const value = effectiveShares(
-        leg.share.id,
-        leg.share.shares,
-        parlayRollovers
+      // The leg's full value = its ML effective shares (won → $1/share) plus the
+      // current value of any combos bought on it; both roll into the next leg.
+      const value = roundToCents(
+        effectiveShares(leg.share.id, leg.share.shares, parlayRollovers) +
+          legComboValue(leg.share.id)
       );
       if (value <= 0) {
         continue;
@@ -837,6 +992,9 @@ const syncParlayStates = async (teamIds: string[]) => {
         targetShareId: target.share.id,
         sharesAdded,
       });
+      // The leg's combos rolled forward with it; mark them so they aren't
+      // double-counted in claimable/settlement.
+      await settleLegCombos(leg.share.id, 'ROLLED_OVER');
     }
 
     // 3) Any loss busts the parlay. Everything downstream of the earliest-start
@@ -873,18 +1031,24 @@ const syncParlayStates = async (teamIds: string[]) => {
         }
 
         // Won downstream legs are worth their full $1/share; otherwise sell at
-        // the current market price.
+        // the current market price. Downstream combos are sold at their value too.
         const sellPrice =
           leg.result === 'WON'
             ? 1
             : ((await legPriceForPosition(leg.share.marketId, leg.position)) ??
               0);
-        settledAmount += legShares * sellPrice;
+        settledAmount += legShares * sellPrice + legComboValue(leg.share.id);
       }
 
       settledAmount = roundToCents(settledAmount);
       if (settledAmount > 0 && blokboyProfile?.id) {
         await creditUserCash(blokboyProfile.id, settledAmount);
+      }
+
+      // Combos are lost with the busted parlay: downstream value went to blokboy
+      // above; everything else is forfeit. Mark them all resolved.
+      for (const leg of legState) {
+        await settleLegCombos(leg.share.id, 'LOST');
       }
 
       await db
@@ -931,11 +1095,12 @@ const syncParlayStates = async (teamIds: string[]) => {
         if (rolledForward) {
           continue;
         }
-        claimableAmount += effectiveShares(
-          leg.share.id,
-          leg.share.shares,
-          parlayRollovers
-        );
+        // Terminal leg → its ML value plus its combos' settled value is
+        // claimable; mark those combos WON so they settle with the leg.
+        claimableAmount +=
+          effectiveShares(leg.share.id, leg.share.shares, parlayRollovers) +
+          legComboValue(leg.share.id);
+        await settleLegCombos(leg.share.id, 'WON');
       }
       claimableAmount = roundToCents(claimableAmount);
 
@@ -978,7 +1143,7 @@ const buildTeamResponses = async (
     // ignore live sync failures and still return team payloads
   }
 
-  const [teams, members, parlays, shares, claims, rollovers] =
+  const [teams, members, parlays, shares, claims, rollovers, legCombos] =
     await Promise.all([
       db.query.parlayTeam.findMany({
         where: (table, { inArray }) => inArray(table.id, teamIds),
@@ -998,7 +1163,33 @@ const buildTeamResponses = async (
       db.query.parlayTeamParlayRollover.findMany({
         where: (table, { inArray }) => inArray(table.teamId, teamIds),
       }),
+      db.query.parlayTeamLegCombo.findMany({
+        where: (table, { inArray }) => inArray(table.teamId, teamIds),
+      }),
     ]);
+
+  // Category per leg's game (to gate the Spreads/Totals badges to MLB legs).
+  const legEventIds = Array.from(
+    new Set(
+      shares
+        .map((share) => share.marketId)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
+  const eventCategoryRows =
+    legEventIds.length > 0
+      ? await db.query.externalMarket.findMany({
+          where: (table, { and, eq: equals, inArray }) =>
+            and(
+              equals(table.sourceProvider, 'POLYMARKET'),
+              inArray(table.sourceEventId, legEventIds)
+            ),
+          columns: { sourceEventId: true, category: true },
+        })
+      : [];
+  const categoryByEventId = new Map(
+    eventCategoryRows.map((row) => [row.sourceEventId, row.category ?? null])
+  );
 
   const userIds = Array.from(
     new Set([
@@ -1006,6 +1197,7 @@ const buildTeamResponses = async (
       ...shares.map((share) => share.addedByUserId),
       ...teams.map((team) => team.createdByUserId),
       ...claims.map((claim) => claim.userId),
+      ...legCombos.map((combo) => combo.addedByUserId),
     ])
   );
 
@@ -1124,11 +1316,37 @@ const buildTeamResponses = async (
             awayTeam: position?.awayTeam ?? '',
             positionSide: position?.side ?? 'draw',
             buySide: position?.buySide ?? (share.side === 'NO' ? 'NO' : 'YES'),
+            category: share.marketId
+              ? (categoryByEventId.get(share.marketId) ?? null)
+              : null,
             placedAt: share.placedAt.toISOString(),
             result:
               share.result === 'WON' || share.result === 'LOST'
                 ? (share.result as LegResolution)
                 : resolveLegResult(position, statuses[share.id]),
+            combos: legCombos
+              .filter((combo) => combo.legShareId === share.id)
+              .map<LegCombo>((combo) => ({
+                id: combo.id,
+                addedByUserId: combo.addedByUserId,
+                addedByUsername:
+                  usernameById.get(combo.addedByUserId) ?? combo.addedByUserId,
+                optionLabel: combo.optionLabel,
+                betType: combo.betType,
+                line: combo.line ?? null,
+                sourceEventId: combo.sourceEventId,
+                comboMarketId: combo.comboMarketId,
+                comboOutcomeLabel: combo.comboOutcomeLabel,
+                shares: combo.shares,
+                stake: combo.stake,
+                entryPrice: combo.entryPrice,
+                result:
+                  combo.result === 'WON' ||
+                  combo.result === 'LOST' ||
+                  combo.result === 'ROLLED_OVER'
+                    ? (combo.result as LegResolution)
+                    : 'PENDING',
+              })),
             principalShares: roundToCents(share.shares),
             rolledInShares,
             effectiveShares: roundToCents(share.shares + rolledInShares),
@@ -1142,13 +1360,22 @@ const buildTeamResponses = async (
         (claim) =>
           claim.parlayId === selectedParlayId && claim.userId === currentUserId
       );
+      // Claim proportion is by stake, including combo stake so a member who only
+      // bought combos still shares the payout.
+      const selectedLegCombos = legCombos.filter(
+        (combo) => combo.parlayId === selectedParlayId
+      );
       const totalStake = roundToCents(
-        teamShares.reduce((sum, share) => sum + share.stake, 0)
+        teamShares.reduce((sum, share) => sum + share.stake, 0) +
+          selectedLegCombos.reduce((sum, combo) => sum + combo.stake, 0)
       );
       const currentUserStake = roundToCents(
         teamShares
           .filter((share) => share.addedByUserId === currentUserId)
-          .reduce((sum, share) => sum + share.stake, 0)
+          .reduce((sum, share) => sum + share.stake, 0) +
+          selectedLegCombos
+            .filter((combo) => combo.addedByUserId === currentUserId)
+            .reduce((sum, combo) => sum + combo.stake, 0)
       );
       const claimableAmount = roundToCents(
         selectedParlay?.claimableAmount ?? 0
@@ -1393,6 +1620,13 @@ export const Route = createFileRoute('/api/parlay-teams')({
           positionId?: string;
           shares?: number;
           legId?: string;
+          // buy-leg-combo
+          comboMarketId?: string;
+          comboOutcomeLabel?: string;
+          optionLabel?: string;
+          betType?: string;
+          line?: number;
+          stake?: number;
         };
 
         if (!body.teamId) {
@@ -1595,21 +1829,55 @@ export const Route = createFileRoute('/api/parlay-teams')({
             0
           );
 
-          await db.insert(parlayTeamParlayShare).values({
-            parlayId: ensuredParlay.id,
-            teamId,
-            addedByUserId: user.id,
-            positionId: body.positionId,
-            sequence: highestSequence + 1,
-            placedAt: new Date(targetPosition.createdAt),
-            cardTitle: targetPosition.matchup,
-            marketId: targetPosition.marketId,
-            optionLabel: optionLabelForPosition(targetPosition),
-            side: targetPosition.buySide,
-            shares: targetShares,
-            stake: roundToCents(targetShares * targetPosition.entryPrice),
-            entryPrice: roundToCents(targetPosition.entryPrice),
-          });
+          const [insertedShare] = await db
+            .insert(parlayTeamParlayShare)
+            .values({
+              parlayId: ensuredParlay.id,
+              teamId,
+              addedByUserId: user.id,
+              positionId: body.positionId,
+              sequence: highestSequence + 1,
+              placedAt: new Date(targetPosition.createdAt),
+              cardTitle: targetPosition.matchup,
+              marketId: targetPosition.marketId,
+              optionLabel: optionLabelForPosition(targetPosition),
+              side: targetPosition.buySide,
+              shares: targetShares,
+              stake: roundToCents(targetShares * targetPosition.entryPrice),
+              entryPrice: roundToCents(targetPosition.entryPrice),
+            })
+            .returning({ id: parlayTeamParlayShare.id });
+
+          // Open spread/total combos attached to this ML position go with it:
+          // transfer them onto the new leg and strip them from the portfolio.
+          const childCombos = currentUserPositions.filter(
+            (position) =>
+              position.parentPositionId === targetPosition.id &&
+              position.comboMarketId &&
+              position.status === 'OPEN'
+          );
+
+          if (childCombos.length > 0) {
+            await db.insert(parlayTeamLegCombo).values(
+              childCombos.map((combo) => ({
+                parlayId: ensuredParlay.id,
+                teamId,
+                legShareId: insertedShare.id,
+                addedByUserId: user.id,
+                sourceEventId: combo.marketId,
+                comboMarketId: combo.comboMarketId as string,
+                comboOutcomeLabel: combo.comboOutcomeLabel as string,
+                optionLabel: combo.optionLabel as string,
+                betType: combo.betType as string,
+                line: Number.isFinite(combo.line) ? Number(combo.line) : null,
+                shares: combo.quantity,
+                stake: combo.stake,
+                entryPrice: combo.entryPrice,
+              }))
+            );
+          }
+
+          const childComboIds = new Set(childCombos.map((combo) => combo.id));
 
           // Deduct the committed shares from the user's position — the shares
           // leave the portfolio and can't be sold or withdrawn until the parlay
@@ -1623,19 +1891,21 @@ export const Route = createFileRoute('/api/parlay-teams')({
               targetPosition.stake - targetShares * targetPosition.entryPrice
             )
           );
-          const nextPositions = currentUserPositions.map((position) =>
-            position.id === targetPosition.id
-              ? {
-                  ...position,
-                  quantity: Math.max(0, remainingQuantity),
-                  stake: remainingStake,
-                  status:
-                    remainingQuantity <= 0
-                      ? ('CLOSED' as const)
-                      : position.status,
-                }
-              : position
-          );
+          const nextPositions = currentUserPositions
+            .filter((position) => !childComboIds.has(position.id))
+            .map((position) =>
+              position.id === targetPosition.id
+                ? {
+                    ...position,
+                    quantity: Math.max(0, remainingQuantity),
+                    stake: remainingStake,
+                    status:
+                      remainingQuantity <= 0
+                        ? ('CLOSED' as const)
+                        : position.status,
+                  }
+                : position
+            );
 
           await db
             .update(paperPortfolio)
@@ -1714,13 +1984,23 @@ export const Route = createFileRoute('/api/parlay-teams')({
             where: (table, { eq: equals }) =>
               equals(table.parlayId, winningParlay.id),
           });
+          const parlayCombos = await db.query.parlayTeamLegCombo.findMany({
+            where: (table, { eq: equals }) =>
+              equals(table.parlayId, winningParlay.id),
+          });
+          // Stake (ML + combos) drives the proportional split, so combo buyers
+          // share the winnings.
           const totalStake = roundToCents(
-            parlayShares.reduce((sum, share) => sum + share.stake, 0)
+            parlayShares.reduce((sum, share) => sum + share.stake, 0) +
+              parlayCombos.reduce((sum, combo) => sum + combo.stake, 0)
           );
           const userStake = roundToCents(
             parlayShares
               .filter((share) => share.addedByUserId === user.id)
-              .reduce((sum, share) => sum + share.stake, 0)
+              .reduce((sum, share) => sum + share.stake, 0) +
+              parlayCombos
+                .filter((combo) => combo.addedByUserId === user.id)
+                .reduce((sum, combo) => sum + combo.stake, 0)
           );
 
           if (totalStake <= 0 || userStake <= 0) {
@@ -1852,7 +2132,35 @@ export const Route = createFileRoute('/api/parlay-teams')({
             );
           }
 
-          const value = roundToCents(legEffectiveShares * currentPrice);
+          // Combos on this leg roll with it: cash them out at current value and
+          // add it to the rolled amount.
+          const legCombosForLeg = await db.query.parlayTeamLegCombo.findMany({
+            where: (table, { eq: equals }) => equals(table.legShareId, leg.id),
+          });
+          const pendingLegCombos = legCombosForLeg.filter(
+            (combo) =>
+              combo.result !== 'WON' &&
+              combo.result !== 'LOST' &&
+              combo.result !== 'ROLLED_OVER'
+          );
+          const comboPriceById = new Map<string, number>();
+          let comboValue = 0;
+          for (const combo of pendingLegCombos) {
+            const comboPrice = await getComboPrice(
+              combo.sourceEventId,
+              combo.comboMarketId,
+              combo.comboOutcomeLabel
+            );
+            if (comboPrice && comboPrice > 0) {
+              comboPriceById.set(combo.id, comboPrice);
+              comboValue += combo.shares * comboPrice;
+            }
+          }
+          comboValue = roundToCents(comboValue);
+
+          const value = roundToCents(
+            legEffectiveShares * currentPrice + comboValue
+          );
           if (value <= 0) {
             return Response.json(
               { ok: false, error: 'NOTHING_TO_ROLL' },
@@ -1923,6 +2231,130 @@ export const Route = createFileRoute('/api/parlay-teams')({
               resolvedPrice: currentPrice,
             })
             .where(eq(parlayTeamParlayShare.id, leg.id));
+
+          // The leg's combos rolled with it — mark them ROLLED_OVER too.
+          for (const combo of pendingLegCombos) {
+            await db
+              .update(parlayTeamLegCombo)
+              .set({
+                result: 'ROLLED_OVER',
+                resolvedAt: new Date(),
+                resolvedPrice: comboPriceById.get(combo.id) ?? null,
+              })
+              .where(eq(parlayTeamLegCombo.id, combo.id));
+          }
+        } else if (body.action === 'buy-leg-combo') {
+          // Any team member can buy a spread/total combo on an MLB leg whose
+          // game hasn't started. Funds are locked into the parlay (the buyer's
+          // cash is debited and the combo rolls/settles with the leg).
+          const stake = roundToCents(Number(body.stake));
+          if (
+            !body.legId ||
+            !body.comboMarketId ||
+            !body.comboOutcomeLabel ||
+            !body.optionLabel ||
+            !(body.betType === 'spread' || body.betType === 'total') ||
+            !Number.isFinite(stake) ||
+            stake <= 0
+          ) {
+            return Response.json(
+              { ok: false, error: 'INVALID_COMBO' },
+              { status: 400 }
+            );
+          }
+
+          const teamParlays = await db.query.parlayTeamParlay.findMany({
+            where: (table, { eq: equals }) => equals(table.teamId, teamId),
+          });
+          const activeParlay = teamParlays.find(
+            (parlay) => parlay.status === 'ACTIVE'
+          );
+          if (!activeParlay) {
+            return Response.json(
+              { ok: false, error: 'PARLAY_NOT_ACTIVE' },
+              { status: 400 }
+            );
+          }
+
+          const leg = await db.query.parlayTeamParlayShare.findFirst({
+            where: (table, { and, eq: equals }) =>
+              and(
+                equals(table.id, body.legId as string),
+                equals(table.parlayId, activeParlay.id)
+              ),
+          });
+          if (!leg || !leg.marketId) {
+            return Response.json(
+              { ok: false, error: 'LEG_NOT_FOUND' },
+              { status: 404 }
+            );
+          }
+
+          // The leg's game must be MLB and not yet started.
+          const eventRow = await db.query.externalMarket.findFirst({
+            where: (table, { and, eq: equals }) =>
+              and(
+                equals(table.sourceProvider, 'POLYMARKET'),
+                equals(table.sourceEventId, leg.marketId as string)
+              ),
+            columns: { category: true, closeTime: true },
+          });
+          if (!eventRow || eventRow.category !== 'mlb-games') {
+            return Response.json(
+              { ok: false, error: 'NOT_MLB_LEG' },
+              { status: 400 }
+            );
+          }
+          if (
+            eventRow.closeTime &&
+            eventRow.closeTime.getTime() <= Date.now()
+          ) {
+            return Response.json(
+              {
+                ok: false,
+                error: 'LEG_STARTED',
+                message: 'Cannot add combos once the leg game has started.',
+              },
+              { status: 400 }
+            );
+          }
+
+          const price = await getComboPrice(
+            leg.marketId,
+            body.comboMarketId,
+            body.comboOutcomeLabel
+          );
+          if (!price || price <= 0) {
+            return Response.json(
+              { ok: false, error: 'PRICE_UNAVAILABLE' },
+              { status: 400 }
+            );
+          }
+
+          // Lock the buyer's cash. Reject when they can't cover the stake.
+          const debited = await debitUserCash(user.id, stake);
+          if (!debited) {
+            return Response.json(
+              { ok: false, error: 'INSUFFICIENT_FUNDS' },
+              { status: 400 }
+            );
+          }
+
+          await db.insert(parlayTeamLegCombo).values({
+            parlayId: activeParlay.id,
+            teamId,
+            legShareId: leg.id,
+            addedByUserId: user.id,
+            sourceEventId: leg.marketId,
+            comboMarketId: body.comboMarketId,
+            comboOutcomeLabel: body.comboOutcomeLabel,
+            optionLabel: body.optionLabel,
+            betType: body.betType,
+            line: Number.isFinite(body.line) ? Number(body.line) : null,
+            shares: roundToCents(stake / price),
+            stake,
+            entryPrice: price,
+          });
         } else {
           return Response.json(
             { ok: false, error: 'INVALID_ACTION' },
