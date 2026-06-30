@@ -782,7 +782,7 @@ const syncParlayStates = async (teamIds: string[]) => {
   for (const eventId of new Set(pendingCombos.map((c) => c.sourceEventId))) {
     const options = await fetchEventCombos(eventId);
     const priceByKey = new Map(
-      [...options.spreads, ...options.totals].map((option) => [
+      options.options.map((option) => [
         `${option.sourceMarketId}:${option.outcomeLabel}`,
         option.price,
       ])

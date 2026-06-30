@@ -14,10 +14,14 @@ type TeamBranding = {
   color: string | null;
 };
 
+// Serves any two-outcome moneyline league (MLB or tennis): one moneyline
+// sub-market per event whose outcomes are the two "team" (or player/pair) names.
+type TwoWayCategory = 'mlb-games' | 'tennis-games';
+
 type MlbMarketItem = {
   id: string;
   sourceProvider: 'POLYMARKET';
-  category: 'mlb-games';
+  category: TwoWayCategory;
   matchup: string;
   kickoff: string;
   homeTeam: string;
@@ -75,17 +79,23 @@ export const Route = createFileRoute('/api/mlb-markets')({
         const queryFrom = parseDateParam(url.searchParams.get('dateFrom'));
         const queryTo = parseDateParam(url.searchParams.get('dateTo'));
 
+        // Defaults to MLB; tennis uses the same two-outcome moneyline shape.
+        const category: TwoWayCategory =
+          url.searchParams.get('category') === 'tennis-games'
+            ? 'tennis-games'
+            : 'mlb-games';
+
         const defaultWindow = getWindow();
         const from = queryFrom ?? defaultWindow.from;
         const to = queryTo ?? defaultWindow.to;
 
-        // Each MLB event persists a single moneyline sub-market whose two
-        // outcomes are the team names (home/away win probabilities).
+        // Each event persists a single moneyline sub-market whose two outcomes
+        // are the two team/player names (home/away win probabilities).
         const marketRows = await db.query.externalMarket.findMany({
           where: (t, { and, eq, gte, lte }) =>
             and(
               eq(t.sourceProvider, 'POLYMARKET'),
-              eq(t.category, 'mlb-games'),
+              eq(t.category, category),
               gte(t.closeTime, from),
               lte(t.closeTime, to)
             ),
@@ -159,13 +169,19 @@ export const Route = createFileRoute('/api/mlb-markets')({
             return {
               id: eventId,
               sourceProvider: 'POLYMARKET' as const,
-              category: 'mlb-games' as const,
+              category,
               matchup: `${homeTeam} vs ${awayTeam}`,
               kickoff: row.closeTime ? row.closeTime.toISOString() : '',
               homeTeam,
               awayTeam,
-              homeBranding: { logo: row.homeLogo ?? '', color: row.homeColor ?? null },
-              awayBranding: { logo: row.awayLogo ?? '', color: row.awayColor ?? null },
+              homeBranding: {
+                logo: row.homeLogo ?? '',
+                color: row.homeColor ?? null,
+              },
+              awayBranding: {
+                logo: row.awayLogo ?? '',
+                color: row.awayColor ?? null,
+              },
               legs: [
                 {
                   id: `${eventId}:home`,

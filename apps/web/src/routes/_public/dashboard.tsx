@@ -20,7 +20,7 @@ type MarketLeg = {
 type MarketItem = {
   id: string;
   sourceProvider: 'POLYMARKET';
-  category: 'fifa-games' | 'mlb-games';
+  category: 'fifa-games' | 'mlb-games' | 'tennis-games';
   matchup: string;
   kickoff: string;
   homeTeam: string;
@@ -47,7 +47,7 @@ type MarketCard = {
   matchup: string;
   kickoffIso: string;
   kickoff: string;
-  category: 'fifa-games' | 'mlb-games';
+  category: 'fifa-games' | 'mlb-games' | 'tennis-games';
   home: { name: string; logo: string; color: string | null };
   away: { name: string; logo: string; color: string | null };
   homeLeg: MarketLeg;
@@ -63,17 +63,18 @@ type SelectedTrade = {
   kickoff: string;
   homeTeam: string;
   awayTeam: string;
-  category: 'fifa-games' | 'mlb-games';
+  category: 'fifa-games' | 'mlb-games' | 'tennis-games';
   side: SelectionSide;
   selectionLabel: string;
 };
 
-type LeagueCategory = 'fifa-games' | 'mlb-games';
+type LeagueCategory = 'fifa-games' | 'mlb-games' | 'tennis-games';
 
 const LEAGUE_META: ReadonlyArray<{ category: LeagueCategory; label: string }> =
   [
     { category: 'fifa-games', label: 'FIFA' },
     { category: 'mlb-games', label: 'MLB' },
+    { category: 'tennis-games', label: 'Tennis' },
   ];
 
 type MarketDetail = {
@@ -140,7 +141,7 @@ type PaperPosition = {
   closedAt: string | null;
   closeValue: number | null;
   // Spreads/totals combo bets placed from the portfolio (absent ⇒ moneyline).
-  betType?: 'moneyline' | 'spread' | 'total';
+  betType?: string;
   optionLabel?: string;
   line?: number;
   comboMarketId?: string;
@@ -334,12 +335,17 @@ const fetchMarkets = async (): Promise<MarketItem[]> => {
 
   const qs = `dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`;
 
-  const [fifaRes, mlbRes] = await Promise.all([
+  const [fifaRes, mlbRes, tennisRes] = await Promise.all([
     fetch(`/api/markets?sourceProvider=POLYMARKET&category=fifa-games&${qs}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
     }),
     fetch(`/api/mlb-markets?${qs}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    }),
+    // Tennis reuses the two-outcome moneyline endpoint via ?category=.
+    fetch(`/api/mlb-markets?category=tennis-games&${qs}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
     }),
@@ -353,7 +359,11 @@ const fetchMarkets = async (): Promise<MarketItem[]> => {
     ? (((await mlbRes.json()) as { markets?: MarketItem[] }).markets ?? [])
     : [];
 
-  return [...fifaMarkets, ...mlbMarkets];
+  const tennisMarkets = tennisRes.ok
+    ? (((await tennisRes.json()) as { markets?: MarketItem[] }).markets ?? [])
+    : [];
+
+  return [...fifaMarkets, ...mlbMarkets, ...tennisMarkets];
 };
 
 const fetchTeamBranding = async (
@@ -919,9 +929,11 @@ const DashboardPage = () => {
     };
   }, [selectedTrade]);
 
-  // MLB markets are two-outcome (no draw), so picking a team is an implicit
-  // "YES" on that team — there's no YES/NO choice to surface.
-  const isMlbTrade = selectedTrade?.category === 'mlb-games';
+  // MLB and tennis markets are two-outcome (no draw), so picking a team/player
+  // is an implicit "YES" on them — there's no YES/NO choice to surface.
+  const isTwoWayTrade =
+    selectedTrade?.category === 'mlb-games' ||
+    selectedTrade?.category === 'tennis-games';
   const isDrawTrade = selectedTrade?.side === 'draw';
 
   // Color the modal's action buttons with the chosen team's palette.
@@ -1280,7 +1292,7 @@ const DashboardPage = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {isMlbTrade ? null : (
+                {isTwoWayTrade ? null : (
                   <>
                     <p className="text-sm text-violet-900">Pick Side</p>
                     <div className="grid grid-cols-2 gap-2">
@@ -1310,7 +1322,7 @@ const DashboardPage = () => {
 
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-violet-900">
-                    Expected Max Payout{isMlbTrade ? '' : ` (${pickSide})`}
+                    Expected Max Payout{isTwoWayTrade ? '' : ` (${pickSide})`}
                   </p>
                   <p className="font-semibold text-sm text-violet-950">
                     ${expectedMaxPayout.toFixed(2)}

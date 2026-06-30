@@ -40,9 +40,10 @@ type PaperPosition = {
   createdAt: string;
   closedAt: string | null;
   closeValue: number | null;
-  // Spreads/totals combo bets placed from the portfolio. Absent ⇒ legacy
-  // moneyline position (side/buySide drive display & pricing as before).
-  betType?: 'moneyline' | 'spread' | 'total';
+  // Spread/total/etc. combo bets placed from the portfolio. Absent ⇒ legacy
+  // moneyline position (side/buySide drive display & pricing as before). The
+  // value is the combo group key (e.g. 'spread', 'total', 'set-handicap').
+  betType?: string;
   optionLabel?: string;
   line?: number;
   // The Polymarket spread/total sub-market + outcome, used to re-price the bet
@@ -140,10 +141,11 @@ type MarketDetail = {
   category?: string | null;
 };
 
-type ComboMarketType = 'spread' | 'total';
-
 type ComboOption = {
-  marketType: ComboMarketType;
+  // Group key (also the placed bet's betType): 'spread' | 'total' |
+  // 'set-handicap' | 'total-sets' | 'total-games' | 'set-winner'.
+  marketType: string;
+  groupLabel: string;
   line: number;
   sourceMarketId: string;
   outcomeLabel: string;
@@ -152,9 +154,39 @@ type ComboOption = {
 };
 
 type ComboOptionsPayload = {
-  spreads: ComboOption[];
-  totals: ComboOption[];
+  options: ComboOption[];
 };
+
+// Which combo groups (badges) a category offers — mirrors the server config in
+// server/polymarket/combos.ts. Drives the data-driven badges without a prefetch.
+const COMBO_GROUPS_BY_CATEGORY: Record<
+  string,
+  { group: string; label: string }[]
+> = {
+  'mlb-games': [
+    { group: 'spread', label: 'Spreads' },
+    { group: 'total', label: 'Totals' },
+  ],
+  'fifa-games': [
+    { group: 'spread', label: 'Spreads' },
+    { group: 'total', label: 'Totals' },
+  ],
+  'tennis-games': [
+    { group: 'set-handicap', label: 'Set Handicap' },
+    { group: 'total-sets', label: 'Total Sets' },
+    { group: 'total-games', label: 'Total Games' },
+    { group: 'set-winner', label: 'Set Winner' },
+  ],
+};
+
+const COMBO_GROUP_LABELS: Record<string, string> = Object.fromEntries(
+  Object.values(COMBO_GROUPS_BY_CATEGORY)
+    .flat()
+    .map((entry) => [entry.group, entry.label])
+);
+
+const comboGroupLabel = (group: string | undefined): string =>
+  (group && COMBO_GROUP_LABELS[group]) || group || 'Add-on';
 
 // A combo can be bought against a personal ML position OR a team parlay leg.
 type ComboSource =
@@ -597,7 +629,7 @@ const fetchMarketDetail = async (
   return (await response.json()) as MarketDetail;
 };
 
-// Spreads/totals options for a game, fetched live (not persisted). marketId is
+// Combo add-on options for a game, fetched live (not persisted). marketId is
 // the position's sourceEventId.
 const fetchComboOptions = async (
   sourceEventId: string
@@ -608,7 +640,7 @@ const fetchComboOptions = async (
   });
 
   if (!response.ok) {
-    return { spreads: [], totals: [] };
+    return { options: [] };
   }
 
   return (await response.json()) as ComboOptionsPayload;
@@ -624,7 +656,7 @@ const fetchComboPrice = async (
   }
 
   const data = await fetchComboOptions(position.marketId);
-  const match = [...data.spreads, ...data.totals].find(
+  const match = data.options.find(
     (option) =>
       option.sourceMarketId === position.comboMarketId &&
       option.outcomeLabel === position.comboOutcomeLabel
@@ -884,12 +916,12 @@ const PortfolioPage = () => {
   const [teamBrandingByName, setTeamBrandingByName] = useState<
     Record<string, TeamBranding>
   >({});
-  // The Spreads/Totals option picker, shown as a bottom sheet on mobile. Spread
-  // and total are added independently — open one, add it, then open the other.
-  // The source is either a personal ML position or a team parlay leg.
+  // The combo option picker (bottom sheet on mobile). Each group (Spreads,
+  // Totals, Set Handicap, …) is opened independently. The source is either a
+  // personal ML position or a team parlay leg.
   const [comboPicker, setComboPicker] = useState<{
     source: ComboSource;
-    type: ComboMarketType;
+    group: string;
   } | null>(null);
   const [comboOptionsByEvent, setComboOptionsByEvent] = useState<
     Record<string, ComboOptionsPayload>
@@ -1133,7 +1165,7 @@ const PortfolioPage = () => {
     if (!options) {
       return null;
     }
-    const match = [...options.spreads, ...options.totals].find(
+    const match = options.options.find(
       (option) =>
         option.sourceMarketId === combo.comboMarketId &&
         option.outcomeLabel === combo.comboOutcomeLabel
@@ -1730,8 +1762,8 @@ const PortfolioPage = () => {
   // Open the Spreads/Totals picker (bottom sheet on mobile), lazily fetching the
   // game's options the first time it's opened. Source = a personal ML position
   // or a team parlay leg.
-  const openComboPicker = (source: ComboSource, type: ComboMarketType) => {
-    setComboPicker({ source, type });
+  const openComboPicker = (source: ComboSource, group: string) => {
+    setComboPicker({ source, group });
 
     const eventId = comboSourceEventId(source);
     if (comboOptionsByEvent[eventId] || loadingCombosByEvent[eventId]) {
@@ -2280,9 +2312,7 @@ const PortfolioPage = () => {
                                     {combo.optionLabel}
                                   </span>
                                   <span className="inline-flex rounded-full border border-indigo-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase tracking-wide">
-                                    {combo.betType === 'spread'
-                                      ? 'Spread'
-                                      : 'Total'}
+                                    {comboGroupLabel(combo.betType)}
                                   </span>
                                 </div>
                                 <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
@@ -2327,22 +2357,30 @@ const PortfolioPage = () => {
                       })()}
 
                       <div className="mt-4 border-gray-100 border-t pt-3">
-                        {positionCategoryById[position.id] === 'mlb-games' &&
-                        !position.comboMarketId ? (
+                        {!position.comboMarketId &&
+                        (
+                          COMBO_GROUPS_BY_CATEGORY[
+                            positionCategoryById[position.id] ?? ''
+                          ] ?? []
+                        ).length > 0 ? (
                           <div className="mb-3 flex flex-wrap items-center gap-2">
-                            {(['spread', 'total'] as const).map((type) => (
+                            {(
+                              COMBO_GROUPS_BY_CATEGORY[
+                                positionCategoryById[position.id] ?? ''
+                              ] ?? []
+                            ).map(({ group, label }) => (
                               <button
-                                key={type}
+                                key={group}
                                 type="button"
                                 onClick={() =>
                                   openComboPicker(
                                     { kind: 'position', position },
-                                    type
+                                    group
                                   )
                                 }
                                 className="inline-flex rounded-full border border-gray-200 bg-white px-3 py-1 font-semibold text-gray-600 text-xs transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
                               >
-                                {type === 'spread' ? 'Spreads' : 'Totals'}
+                                {label}
                               </button>
                             ))}
                           </div>
@@ -2884,9 +2922,7 @@ const PortfolioPage = () => {
                                         {combo.optionLabel}
                                       </span>
                                       <span className="inline-flex rounded-full border border-indigo-200 bg-white px-2 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase tracking-wide">
-                                        {combo.betType === 'spread'
-                                          ? 'Spread'
-                                          : 'Total'}
+                                        {comboGroupLabel(combo.betType)}
                                       </span>
                                       <span className="inline-flex rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] text-gray-700">
                                         {combo.addedByUsername}
@@ -2924,14 +2960,18 @@ const PortfolioPage = () => {
                             </div>
                           ) : null}
 
-                          {leg.category === 'mlb-games' &&
-                          leg.result === 'PENDING' &&
+                          {leg.result === 'PENDING' &&
                           leg.marketId &&
-                          new Date(leg.kickoff).getTime() > Date.now() ? (
+                          new Date(leg.kickoff).getTime() > Date.now() &&
+                          (COMBO_GROUPS_BY_CATEGORY[leg.category ?? ''] ?? [])
+                            .length > 0 ? (
                             <div className="mt-2 flex flex-wrap items-center gap-2">
-                              {(['spread', 'total'] as const).map((type) => (
+                              {(
+                                COMBO_GROUPS_BY_CATEGORY[leg.category ?? ''] ??
+                                []
+                              ).map(({ group, label }) => (
                                 <button
-                                  key={type}
+                                  key={group}
                                   type="button"
                                   onClick={() =>
                                     openComboPicker(
@@ -2942,12 +2982,12 @@ const PortfolioPage = () => {
                                         sourceEventId: leg.marketId as string,
                                         matchup: leg.cardTitle,
                                       },
-                                      type
+                                      group
                                     )
                                   }
                                   className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-0.5 font-semibold text-[11px] text-gray-600 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
                                 >
-                                  {type === 'spread' ? 'Spreads' : 'Totals'}
+                                  {label}
                                 </button>
                               ))}
                             </div>
@@ -3144,7 +3184,7 @@ const PortfolioPage = () => {
                               {combo.optionLabel}
                             </span>
                             <span className="inline-flex rounded-full border border-indigo-200 bg-white px-1.5 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase">
-                              {combo.betType === 'spread' ? 'Spread' : 'Total'}
+                              {comboGroupLabel(combo.betType)}
                             </span>
                           </button>
                         );
@@ -3348,9 +3388,7 @@ const PortfolioPage = () => {
                                 {combo.optionLabel}
                               </span>
                               <span className="inline-flex rounded-full border border-indigo-200 bg-white px-1.5 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase">
-                                {combo.betType === 'spread'
-                                  ? 'Spread'
-                                  : 'Total'}
+                                {comboGroupLabel(combo.betType)}
                               </span>
                             </span>
                             <span
@@ -3412,7 +3450,7 @@ const PortfolioPage = () => {
         >
           <ResponsiveDialogHeader>
             <ResponsiveDialogTitle className="text-violet-950">
-              {comboPicker?.type === 'spread' ? 'Spreads' : 'Totals'}
+              {comboGroupLabel(comboPicker?.group)}
             </ResponsiveDialogTitle>
             <p className="text-sm text-violet-800">
               {comboPicker
@@ -3435,10 +3473,9 @@ const PortfolioPage = () => {
 
               const eventId = comboSourceEventId(comboPicker.source);
               const options = comboOptionsByEvent[eventId];
-              const list =
-                comboPicker.type === 'spread'
-                  ? (options?.spreads ?? [])
-                  : (options?.totals ?? []);
+              const list = (options?.options ?? []).filter(
+                (option) => option.marketType === comboPicker.group
+              );
 
               if (loadingCombosByEvent[eventId] && !options) {
                 return (
@@ -3449,7 +3486,7 @@ const PortfolioPage = () => {
               if (list.length === 0) {
                 return (
                   <p className="text-sm text-violet-700">
-                    No {comboPicker.type === 'spread' ? 'spread' : 'total'}{' '}
+                    No {comboGroupLabel(comboPicker.group).toLowerCase()}{' '}
                     markets available right now.
                   </p>
                 );
@@ -3524,8 +3561,7 @@ const PortfolioPage = () => {
           <div className="space-y-4 max-md:space-y-3">
             <p className="text-sm text-violet-800 max-md:text-xs">
               Choose your paper stake for this{' '}
-              {comboBet?.option.marketType === 'spread' ? 'spread' : 'total'}{' '}
-              bet.
+              {comboGroupLabel(comboBet?.option.marketType).toLowerCase()} bet.
             </p>
 
             <div className="grid grid-cols-4 gap-2">

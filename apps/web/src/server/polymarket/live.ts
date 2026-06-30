@@ -59,6 +59,13 @@ const formatElapsed = (
   return trimmedPeriod || 'Live';
 };
 
+// Tennis period is a set code like "S4" → "Set 4".
+const formatTennisPeriod = (period: string | null | undefined): string => {
+  const value = (period ?? '').trim();
+  const match = value.match(/^S(\d+)$/i);
+  return match ? `Set ${match[1]}` : value || 'Live';
+};
+
 // Live status from Polymarket for one event (marketId = persisted sourceEventId).
 // Returns null when Polymarket has no started/finished state to report (so the
 // caller can fall back to api-football / the time-based heuristic).
@@ -71,11 +78,15 @@ export const fetchPolymarketLiveStatus = async (
         eq(t.sourceProvider, 'POLYMARKET'),
         eq(t.sourceEventId, sourceEventId)
       ),
-    columns: { eventSlug: true },
+    columns: { eventSlug: true, category: true },
   });
   if (!row?.eventSlug) {
     return null;
   }
+
+  // Tennis scores are set-by-set ("7-6(8-6), 6-1, …"), not "home-away", so we
+  // display the raw string + the set as the clock and skip numeric scores.
+  const isTennis = row.category === 'tennis-games';
 
   let event: GammaSportsEvent | undefined;
   try {
@@ -94,6 +105,11 @@ export const fetchPolymarketLiveStatus = async (
   }
 
   const score = parseScore(event.score);
+  const rawScoreLabel = (event.score ?? '').trim() || null;
+  // For tennis, expose the raw set score only (no numeric home/away).
+  const homeScore = isTennis ? null : score.home;
+  const awayScore = isTennis ? null : score.away;
+  const scoreLabel = isTennis ? rawScoreLabel : score.label;
 
   if (event.ended || event.closed) {
     return {
@@ -101,22 +117,24 @@ export const fetchPolymarketLiveStatus = async (
       hasStarted: true,
       isFinal: true,
       eventTime: 'Final',
-      homeScore: score.home,
-      awayScore: score.away,
-      scoreLabel: score.label,
+      homeScore,
+      awayScore,
+      scoreLabel,
     };
   }
 
   if (event.live) {
-    const label = formatElapsed(event.elapsed, event.period);
+    const label = isTennis
+      ? formatTennisPeriod(event.period)
+      : formatElapsed(event.elapsed, event.period);
     return {
       statusLabel: label,
       hasStarted: true,
       isFinal: false,
       eventTime: label,
-      homeScore: score.home,
-      awayScore: score.away,
-      scoreLabel: score.label,
+      homeScore,
+      awayScore,
+      scoreLabel,
     };
   }
 

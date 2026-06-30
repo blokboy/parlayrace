@@ -23,7 +23,7 @@ type PaperPosition = {
   closedAt: string | null;
   closeValue: number | null;
   // Spreads/totals combo bets placed from the portfolio (absent ⇒ moneyline).
-  betType?: 'moneyline' | 'spread' | 'total';
+  betType?: string;
   optionLabel?: string;
   line?: number;
   comboMarketId?: string;

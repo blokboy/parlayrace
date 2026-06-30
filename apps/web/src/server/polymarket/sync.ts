@@ -11,7 +11,7 @@ import {
 
 type PolymarketToken = { outcome: string; price: number };
 
-type MarketCategory = 'fifa-games' | 'mlb-games';
+type MarketCategory = 'fifa-games' | 'mlb-games' | 'tennis-games';
 
 type PolymarketMarket = {
   id: string | number;
@@ -143,11 +143,12 @@ const isMatchResultMarket = (market: PolymarketMarket): boolean =>
 const isMoneylineMarket = (market: PolymarketMarket): boolean =>
   market.sportsMarketType === 'moneyline';
 
-// Per-category market filter: FIFA win/draw binaries vs MLB moneyline.
+// Per-category market filter: FIFA win/draw/away binaries vs the single
+// moneyline match-winner for MLB and tennis.
 const passesCategoryFilter = (market: EnrichedMarket): boolean =>
-  market.__category === 'mlb-games'
-    ? isMoneylineMarket(market)
-    : isMatchResultMarket(market);
+  market.__category === 'fifa-games'
+    ? isMatchResultMarket(market)
+    : isMoneylineMarket(market);
 
 // Polymarket's gameStartTime is "2026-07-07 18:15:00+00" (space, short offset),
 // not strict ISO — normalize before Date parsing.
@@ -312,6 +313,28 @@ export const fetchMlbGameEvents = async (
     .slice(0, limit);
 };
 
+// Fetch Wimbledon match events (singles + doubles) from the `wimbledon` tag.
+// Every 2-team event is a match; teams=0 events are tournament futures/props.
+export const fetchTennisGameEvents = async (
+  limit = 1000
+): Promise<PolymarketEvent[]> => {
+  const pageLimit = Math.min(Math.max(limit, 1), 500);
+
+  try {
+    const res = await fetch(
+      `https://gamma-api.polymarket.com/events?limit=${pageLimit}&active=true&closed=false&tag_slug=wimbledon`
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const events = Array.isArray(data) ? (data as PolymarketEvent[]) : [];
+    return events
+      .filter((event) => (event.teams?.length ?? 0) === 2)
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+};
+
 export type SyncPolyMarketOptions = {
   limit?: number;
   batchSize?: number;
@@ -410,7 +433,11 @@ const pruneOldPolymarketMarkets = async (): Promise<number> => {
     .where(
       and(
         eq(externalMarket.sourceProvider, 'POLYMARKET'),
-        inArray(externalMarket.category, ['fifa-games', 'mlb-games']),
+        inArray(externalMarket.category, [
+          'fifa-games',
+          'mlb-games',
+          'tennis-games',
+        ]),
         lt(externalMarket.closeTime, cutoff)
       )
     )
@@ -817,12 +844,15 @@ export const syncPolyMarketMarkets = async (
       );
     }
 
-    // Fetch both sports in parallel and tag each event with its category.
-    const [fifaEvents, mlbEvents] = await Promise.all([
+    // Fetch all leagues in parallel and tag each event with its category.
+    const [fifaEvents, mlbEvents, tennisEvents] = await Promise.all([
       withRetry(() => fetchWorldCupGameEvents(limit), {
         attempts: retryAttempts,
       }),
       withRetry(() => fetchMlbGameEvents(limit), { attempts: retryAttempts }),
+      withRetry(() => fetchTennisGameEvents(limit), {
+        attempts: retryAttempts,
+      }),
     ]);
 
     const taggedEvents: { event: PolymarketEvent; category: MarketCategory }[] =
@@ -834,6 +864,10 @@ export const syncPolyMarketMarkets = async (
         ...mlbEvents.map((event) => ({
           event,
           category: 'mlb-games' as const,
+        })),
+        ...tennisEvents.map((event) => ({
+          event,
+          category: 'tennis-games' as const,
         })),
       ];
 
