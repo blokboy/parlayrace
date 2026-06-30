@@ -461,6 +461,31 @@ type ResolvedPrices = Record<
   { home: number; draw: number; away: number }
 >;
 
+// Renders a team's flag/logo next to a score. MLB logos are square (shown
+// uncropped); FIFA flags are rectangular.
+const TeamFlag = ({
+  team,
+  square = false,
+}: {
+  team: { name: string; logo: string };
+  square?: boolean;
+}) =>
+  team.logo ? (
+    <img
+      src={team.logo}
+      alt={`${team.name} logo`}
+      className={
+        square
+          ? 'h-4 w-4 rounded-sm object-contain'
+          : 'h-3 w-4 rounded-[2px] object-cover'
+      }
+    />
+  ) : (
+    <span className="font-semibold text-[10px] uppercase">
+      {team.name.slice(0, 3)}
+    </span>
+  );
+
 const StatusBadge = ({
   card,
   status,
@@ -471,6 +496,33 @@ const StatusBadge = ({
   resolvedPrices: ResolvedPrices;
 }) => {
   if (!status?.isFinal) {
+    // Active game with a score → show each team's flag next to its own score so
+    // it's clear which team has which.
+    if (
+      status?.hasStarted &&
+      status.homeScore !== null &&
+      status.awayScore !== null
+    ) {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-xs">
+          <TeamFlag
+            team={card.home}
+            square={card.category === 'mlb-games'}
+          />
+          <span className="font-semibold">{status.homeScore}</span>
+          <span className="opacity-50">-</span>
+          <span className="font-semibold">{status.awayScore}</span>
+          <TeamFlag
+            team={card.away}
+            square={card.category === 'mlb-games'}
+          />
+          {status.eventTime ? (
+            <span className="opacity-75">· {status.eventTime}</span>
+          ) : null}
+        </span>
+      );
+    }
+
     return (
       <span className="inline-block rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-xs">
         {formatLiveSummary(status, status?.statusLabel ?? 'OPEN')}
@@ -518,7 +570,11 @@ const StatusBadge = ({
           <img
             src={winnerTeam.logo}
             alt=""
-            className="h-3 w-4 rounded-sm object-cover"
+            className={
+              card.category === 'mlb-games'
+                ? 'h-4 w-4 rounded-sm object-contain'
+                : 'h-3 w-4 rounded-sm object-cover'
+            }
           />
         ) : null}
         <span>{winnerTeam.name}</span>
@@ -947,27 +1003,66 @@ const DashboardPage = () => {
       return;
     }
 
-    const position: PaperPosition = {
-      id: crypto.randomUUID(),
-      marketId: selectedTrade.marketId,
-      matchup: selectedTrade.matchup,
-      homeTeam: selectedTrade.homeTeam,
-      awayTeam: selectedTrade.awayTeam,
-      side: selectedTrade.side,
-      buySide: pickSide,
-      stake: effectiveStake,
-      entryPrice: selectedPrice,
-      quantity: roundToCents(effectiveStake / selectedPrice),
-      kickoff: selectedTrade.kickoff,
-      status: 'OPEN',
-      createdAt: new Date().toISOString(),
-      closedAt: null,
-      closeValue: null,
-    };
+    const addedQuantity = roundToCents(effectiveStake / selectedPrice);
+
+    // Buying more of a selection the user already holds merges into that
+    // position's existing card (blended entry price) instead of adding a
+    // duplicate card. Combos are excluded — they have their own identity.
+    const existingPosition = portfolio.positions.find(
+      (candidate) =>
+        candidate.status === 'OPEN' &&
+        !candidate.comboMarketId &&
+        !candidate.parentPositionId &&
+        candidate.marketId === selectedTrade.marketId &&
+        candidate.side === selectedTrade.side &&
+        candidate.buySide === pickSide
+    );
+
+    let nextPositions: PaperPosition[];
+    if (existingPosition) {
+      const mergedQuantity = roundToCents(
+        existingPosition.quantity + addedQuantity
+      );
+      const mergedStake = roundToCents(existingPosition.stake + effectiveStake);
+      const mergedEntryPrice =
+        mergedQuantity > 0
+          ? roundToCents(mergedStake / mergedQuantity)
+          : existingPosition.entryPrice;
+
+      nextPositions = portfolio.positions.map((candidate) =>
+        candidate.id === existingPosition.id
+          ? {
+              ...candidate,
+              quantity: mergedQuantity,
+              stake: mergedStake,
+              entryPrice: mergedEntryPrice,
+            }
+          : candidate
+      );
+    } else {
+      const position: PaperPosition = {
+        id: crypto.randomUUID(),
+        marketId: selectedTrade.marketId,
+        matchup: selectedTrade.matchup,
+        homeTeam: selectedTrade.homeTeam,
+        awayTeam: selectedTrade.awayTeam,
+        side: selectedTrade.side,
+        buySide: pickSide,
+        stake: effectiveStake,
+        entryPrice: selectedPrice,
+        quantity: addedQuantity,
+        kickoff: selectedTrade.kickoff,
+        status: 'OPEN',
+        createdAt: new Date().toISOString(),
+        closedAt: null,
+        closeValue: null,
+      };
+      nextPositions = [position, ...portfolio.positions];
+    }
 
     const nextState: PaperPortfolioState = {
       cash: roundToCents(portfolio.cash - effectiveStake),
-      positions: [position, ...portfolio.positions],
+      positions: nextPositions,
     };
 
     const saved = await savePortfolioStateForUser(nextState);

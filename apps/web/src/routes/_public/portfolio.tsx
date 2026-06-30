@@ -1827,35 +1827,71 @@ const PortfolioPage = () => {
       return;
     }
 
-    const newPosition: PaperPosition = {
-      id: crypto.randomUUID(),
-      marketId: position.marketId,
-      matchup: position.matchup,
-      homeTeam: position.homeTeam,
-      awayTeam: position.awayTeam,
-      // Combo bets are side-agnostic; keep schema-required fields neutral and
-      // drive display/pricing off the combo fields instead.
-      side: 'home',
-      buySide: 'YES',
-      stake: effectiveStake,
-      entryPrice: option.price,
-      quantity: roundToCents(effectiveStake / option.price),
-      kickoff: position.kickoff,
-      status: 'OPEN',
-      createdAt: new Date().toISOString(),
-      closedAt: null,
-      closeValue: null,
-      betType: option.marketType,
-      optionLabel: option.label,
-      line: option.line,
-      comboMarketId: option.sourceMarketId,
-      comboOutcomeLabel: option.outcomeLabel,
-      parentPositionId: position.id,
-    };
+    const addedQuantity = roundToCents(effectiveStake / option.price);
+
+    // Buying more of the same combo on the same ML position merges into the
+    // existing nested entry (blended entry price) rather than duplicating it.
+    const existingCombo = portfolio.positions.find(
+      (candidate) =>
+        candidate.status === 'OPEN' &&
+        candidate.parentPositionId === position.id &&
+        candidate.comboMarketId === option.sourceMarketId &&
+        candidate.comboOutcomeLabel === option.outcomeLabel
+    );
+
+    let nextPositions: PaperPosition[];
+    if (existingCombo) {
+      const mergedQuantity = roundToCents(
+        existingCombo.quantity + addedQuantity
+      );
+      const mergedStake = roundToCents(existingCombo.stake + effectiveStake);
+      const mergedEntryPrice =
+        mergedQuantity > 0
+          ? roundToCents(mergedStake / mergedQuantity)
+          : existingCombo.entryPrice;
+
+      nextPositions = portfolio.positions.map((candidate) =>
+        candidate.id === existingCombo.id
+          ? {
+              ...candidate,
+              quantity: mergedQuantity,
+              stake: mergedStake,
+              entryPrice: mergedEntryPrice,
+            }
+          : candidate
+      );
+    } else {
+      const newPosition: PaperPosition = {
+        id: crypto.randomUUID(),
+        marketId: position.marketId,
+        matchup: position.matchup,
+        homeTeam: position.homeTeam,
+        awayTeam: position.awayTeam,
+        // Combo bets are side-agnostic; keep schema-required fields neutral and
+        // drive display/pricing off the combo fields instead.
+        side: 'home',
+        buySide: 'YES',
+        stake: effectiveStake,
+        entryPrice: option.price,
+        quantity: addedQuantity,
+        kickoff: position.kickoff,
+        status: 'OPEN',
+        createdAt: new Date().toISOString(),
+        closedAt: null,
+        closeValue: null,
+        betType: option.marketType,
+        optionLabel: option.label,
+        line: option.line,
+        comboMarketId: option.sourceMarketId,
+        comboOutcomeLabel: option.outcomeLabel,
+        parentPositionId: position.id,
+      };
+      nextPositions = [newPosition, ...portfolio.positions];
+    }
 
     const nextState: PaperPortfolioState = {
       cash: roundToCents(portfolio.cash - effectiveStake),
-      positions: [newPosition, ...portfolio.positions],
+      positions: nextPositions,
     };
 
     const saved = await savePortfolioStateForUser(nextState);
