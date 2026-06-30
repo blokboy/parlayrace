@@ -1828,6 +1828,27 @@ const PortfolioPage = () => {
 
   const expectedSellValue = roundToCents(sellShares * selectedSellPrice);
 
+  // Selling an ML position also liquidates its open spread/total combos in full,
+  // so surface each add-on's value and the aggregate before the user confirms.
+  const sellComboChildren = sellPosition
+    ? portfolioState.positions.filter(
+        (position) =>
+          position.parentPositionId === sellPosition.id &&
+          position.comboMarketId &&
+          position.status === 'OPEN'
+      )
+    : [];
+  const sellComboValue = (combo: PaperPosition) =>
+    roundToCents(
+      combo.quantity * (positionCurrentPricesById[combo.id] ?? combo.entryPrice)
+    );
+  const sellComboProceeds = roundToCents(
+    sellComboChildren.reduce((sum, combo) => sum + sellComboValue(combo), 0)
+  );
+  const sellAggregateValue = roundToCents(
+    expectedSellValue + sellComboProceeds
+  );
+
   const addSharesPalette = paletteForSelection(
     selectedTeamPosition,
     teamBrandingByName
@@ -3101,11 +3122,52 @@ const PortfolioPage = () => {
                 </p>
 
                 <div className="flex items-center justify-between">
-                  <p className="text-sm text-violet-900">Expected Proceeds</p>
+                  <p className="text-sm text-violet-900">
+                    {sellComboChildren.length > 0
+                      ? 'Position Proceeds'
+                      : 'Expected Proceeds'}
+                  </p>
                   <p className="font-semibold text-sm text-violet-950">
                     ${expectedSellValue.toFixed(2)}
                   </p>
                 </div>
+
+                {sellComboChildren.length > 0 ? (
+                  <>
+                    <div className="space-y-1 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2">
+                      <p className="font-semibold text-[11px] text-violet-900 uppercase tracking-wide">
+                        Spread/Total add-ons (sold in full)
+                      </p>
+                      {sellComboChildren.map((combo) => (
+                        <div
+                          key={combo.id}
+                          className="flex items-center justify-between gap-2 text-xs"
+                        >
+                          <span className="flex items-center gap-1.5 text-violet-800">
+                            <span className="font-medium">
+                              {combo.optionLabel}
+                            </span>
+                            <span className="inline-flex rounded-full border border-indigo-200 bg-white px-1.5 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase">
+                              {combo.betType === 'spread' ? 'Spread' : 'Total'}
+                            </span>
+                          </span>
+                          <span className="font-semibold text-violet-950">
+                            +${sellComboValue(combo).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between border-violet-100 border-t pt-2">
+                      <p className="font-semibold text-sm text-violet-900">
+                        Total Sale Value
+                      </p>
+                      <p className="font-semibold text-base text-violet-950">
+                        ${sellAggregateValue.toFixed(2)}
+                      </p>
+                    </div>
+                  </>
+                ) : null}
 
                 <button
                   type="button"
@@ -3124,7 +3186,7 @@ const PortfolioPage = () => {
                   className="inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50 max-md:py-1.5"
                 >
                   <span>Confirm SELL</span>
-                  <span>${selectedSellPrice.toFixed(2)}</span>
+                  <span>${sellAggregateValue.toFixed(2)}</span>
                 </button>
               </>
             )}
