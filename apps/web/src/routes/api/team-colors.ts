@@ -1,14 +1,5 @@
+import { db } from '@starter/backend/db';
 import { createFileRoute } from '@tanstack/react-router';
-
-type PolymarketTeam = {
-  name: string;
-  logo: string;
-  color: string | null;
-};
-
-type PolymarketEvent = {
-  teams: PolymarketTeam[] | null;
-};
 
 type TeamBranding = {
   name: string;
@@ -16,22 +7,16 @@ type TeamBranding = {
   color: string | null;
 };
 
-const normalizeHexColor = (input: string | null | undefined): string | null => {
-  if (!input) {
-    return null;
-  }
-
-  const value = input.trim();
-  return /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(value) ? value : null;
-};
-
+// Branding (logo + color) for the requested team names, sourced from our synced
+// markets. This covers BOTH FIFA national-team flags and MLB club logos — the
+// sync persists each game's home/away logo on external_market, so a single DB
+// lookup serves every league (no live tag-window dependency).
 export const Route = createFileRoute('/api/team-colors')({
   server: {
     handlers: {
       GET: async ({ request }) => {
         const url = new URL(request.url);
-        const teamsParam = url.searchParams.get('teams') ?? '';
-        const requestedTeams = teamsParam
+        const requestedTeams = (url.searchParams.get('teams') ?? '')
           .split(',')
           .map((value) => value.trim())
           .filter(Boolean);
@@ -40,50 +25,54 @@ export const Route = createFileRoute('/api/team-colors')({
           return Response.json({ teams: {} as Record<string, TeamBranding> });
         }
 
-        const response = await fetch(
-          'https://gamma-api.polymarket.com/events?limit=200&active=true&closed=false&tag_slug=soccer'
-        );
-
-        if (!response.ok) {
-          return Response.json(
-            { teams: {} as Record<string, TeamBranding> },
-            { status: 200 }
-          );
-        }
-
-        const events = (await response.json()) as PolymarketEvent[];
-        const catalog = new Map<string, TeamBranding>();
-
-        for (const event of events) {
-          if (!event.teams) {
-            continue;
-          }
-
-          for (const team of event.teams) {
-            if (!team.name || !team.logo) {
-              continue;
-            }
-
-            if (!catalog.has(team.name)) {
-              catalog.set(team.name, {
-                name: team.name,
-                logo: team.logo,
-                color: normalizeHexColor(team.color),
-              });
-            }
-          }
-        }
-
-        const teams = requestedTeams.reduce<Record<string, TeamBranding>>(
-          (acc, name) => {
-            const value = catalog.get(name);
-            if (value) {
-              acc[name] = value;
-            }
-            return acc;
+        const rows = await db.query.externalMarket.findMany({
+          where: (table, { and, eq, inArray, or }) =>
+            and(
+              eq(table.sourceProvider, 'POLYMARKET'),
+              or(
+                inArray(table.homeTeam, requestedTeams),
+                inArray(table.awayTeam, requestedTeams)
+              )
+            ),
+          columns: {
+            homeTeam: true,
+            homeLogo: true,
+            homeColor: true,
+            awayTeam: true,
+            awayLogo: true,
+            awayColor: true,
           },
-          {}
-        );
+        });
+
+        const requested = new Set(requestedTeams);
+        const teams: Record<string, TeamBranding> = {};
+
+        for (const row of rows) {
+          if (
+            row.homeTeam &&
+            row.homeLogo &&
+            requested.has(row.homeTeam) &&
+            !teams[row.homeTeam]
+          ) {
+            teams[row.homeTeam] = {
+              name: row.homeTeam,
+              logo: row.homeLogo,
+              color: row.homeColor ?? null,
+            };
+          }
+          if (
+            row.awayTeam &&
+            row.awayLogo &&
+            requested.has(row.awayTeam) &&
+            !teams[row.awayTeam]
+          ) {
+            teams[row.awayTeam] = {
+              name: row.awayTeam,
+              logo: row.awayLogo,
+              color: row.awayColor ?? null,
+            };
+          }
+        }
 
         return Response.json({ teams });
       },
