@@ -1692,6 +1692,8 @@ export const Route = createFileRoute('/api/parlay-teams')({
           teamId?: string;
           positionId?: string;
           shares?: number;
+          // commit-share: which of the position's combos to send with the leg.
+          comboPositionIds?: string[];
           legId?: string;
           // buy-leg-combo
           comboMarketId?: string;
@@ -1930,9 +1932,26 @@ export const Route = createFileRoute('/api/parlay-teams')({
               position.status === 'OPEN'
           );
 
-          if (childCombos.length > 0) {
+          // Deduct the committed shares from the user's position — the shares
+          // leave the portfolio and can't be sold or withdrawn until the parlay
+          // concludes with a victory.
+          const remainingQuantity = roundToCents(
+            targetPosition.quantity - targetShares
+          );
+
+          // Only the user-selected combos ride along — except a full-position
+          // commit (position closes) must take them all, or they'd orphan.
+          const requestedComboIds = new Set(
+            Array.isArray(body.comboPositionIds) ? body.comboPositionIds : []
+          );
+          const combosToTransfer =
+            remainingQuantity <= 0
+              ? childCombos
+              : childCombos.filter((combo) => requestedComboIds.has(combo.id));
+
+          if (combosToTransfer.length > 0) {
             await db.insert(parlayTeamLegCombo).values(
-              childCombos.map((combo) => ({
+              combosToTransfer.map((combo) => ({
                 parlayId: ensuredParlay.id,
                 teamId,
                 legShareId: insertedShare.id,
@@ -1950,13 +1969,8 @@ export const Route = createFileRoute('/api/parlay-teams')({
             );
           }
 
-          const childComboIds = new Set(childCombos.map((combo) => combo.id));
-
-          // Deduct the committed shares from the user's position — the shares
-          // leave the portfolio and can't be sold or withdrawn until the parlay
-          // concludes with a victory.
-          const remainingQuantity = roundToCents(
-            targetPosition.quantity - targetShares
+          const childComboIds = new Set(
+            combosToTransfer.map((combo) => combo.id)
           );
           const remainingStake = roundToCents(
             Math.max(

@@ -707,7 +707,8 @@ const createParlayTeam = async (
 const commitShareToParlayTeam = async (
   teamId: string,
   positionId: string,
-  shares: number
+  shares: number,
+  comboPositionIds: string[]
 ): Promise<ParlayTeam | null> => {
   const response = await fetch('/api/parlay-teams', {
     method: 'PATCH',
@@ -720,6 +721,7 @@ const commitShareToParlayTeam = async (
       teamId,
       positionId,
       shares,
+      comboPositionIds,
     }),
   });
 
@@ -846,6 +848,11 @@ const PortfolioPage = () => {
     useState<ParlayTeam | null>(null);
   const [selectedTeamPositionId, setSelectedTeamPositionId] = useState('');
   const [sharesToCommit, setSharesToCommit] = useState(0);
+  // Which of the chosen ML position's combos to send to the leg with it (a full
+  // commit always sends them all). Seeded to all when a position is picked.
+  const [teamComboSelectedIds, setTeamComboSelectedIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [committingShare, setCommittingShare] = useState(false);
   const [teamModalFeedback, setTeamModalFeedback] = useState<string | null>(
     null
@@ -1215,6 +1222,10 @@ const PortfolioPage = () => {
     );
 
     return openPositions.filter((position) => {
+      // Only ML bets are committable as legs; combos ride along via selection.
+      if (position.comboMarketId) {
+        return false;
+      }
       if (teamPositionIds.has(position.id)) {
         return false;
       }
@@ -1235,6 +1246,28 @@ const PortfolioPage = () => {
       ) ?? null
     );
   }, [selectedTeamOpenPositions, selectedTeamPositionId]);
+
+  // The chosen ML position's open combos, and which are selected to ride along.
+  // A full-share commit always sends them all (mirrors the Confirm Sell rule).
+  const selectedTeamPositionCombos = useMemo(() => {
+    if (!selectedTeamPosition) {
+      return [] as PaperPosition[];
+    }
+    return openPositions.filter(
+      (position) =>
+        position.parentPositionId === selectedTeamPosition.id &&
+        position.comboMarketId &&
+        position.status === 'OPEN'
+    );
+  }, [openPositions, selectedTeamPosition]);
+
+  const commitIsFullPosition =
+    selectedTeamPosition !== null &&
+    sharesToCommit >= selectedTeamPosition.quantity;
+  const isTeamComboSelected = (combo: PaperPosition) =>
+    commitIsFullPosition || teamComboSelectedIds.has(combo.id);
+  const selectedTeamCombos =
+    selectedTeamPositionCombos.filter(isTeamComboSelected);
 
   const selectedParlayFirstLegStarted = useMemo(() => {
     if (!selectedParlayTeam || selectedParlayTeam.committedLegs.length === 0) {
@@ -1607,7 +1640,8 @@ const PortfolioPage = () => {
     const nextTeam = await commitShareToParlayTeam(
       selectedParlayTeam.id,
       selectedTeamPosition.id,
-      clampedShares
+      clampedShares,
+      selectedTeamCombos.map((combo) => combo.id)
     );
 
     setCommittingShare(false);
@@ -1623,6 +1657,7 @@ const PortfolioPage = () => {
     setSelectedParlayTeam(nextTeam);
     setSelectedTeamPositionId('');
     setSharesToCommit(0);
+    setTeamComboSelectedIds(new Set());
     setTeamModalFeedback('Shares added to Parlay Team.');
   };
 
@@ -2937,19 +2972,42 @@ const PortfolioPage = () => {
                       setSharesToCommit(
                         position ? roundToCents(position.quantity) : 0
                       );
+                      // Seed combo selection to all of the picked position's combos.
+                      setTeamComboSelectedIds(
+                        new Set(
+                          position
+                            ? openPositions
+                                .filter(
+                                  (candidate) =>
+                                    candidate.parentPositionId ===
+                                      position.id &&
+                                    candidate.comboMarketId &&
+                                    candidate.status === 'OPEN'
+                                )
+                                .map((candidate) => candidate.id)
+                            : []
+                        )
+                      );
                     }}
                     className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
                   >
                     <option value="">Select an open position</option>
-                    {selectedTeamOpenPositions.map((position) => (
-                      <option
-                        key={position.id}
-                        value={position.id}
-                      >
-                        {position.matchup} · {position.side.toUpperCase()} ·{' '}
-                        {position.quantity.toFixed(2)} shares
-                      </option>
-                    ))}
+                    {selectedTeamOpenPositions.map((position) => {
+                      const chosenTeam =
+                        position.side === 'home'
+                          ? position.homeTeam
+                          : position.side === 'away'
+                            ? position.awayTeam
+                            : 'Draw';
+                      return (
+                        <option
+                          key={position.id}
+                          value={position.id}
+                        >
+                          {position.matchup} · {chosenTeam}
+                        </option>
+                      );
+                    })}
                   </select>
 
                   {selectedTeamOpenPositions.length === 0 ? (
@@ -2999,6 +3057,62 @@ const PortfolioPage = () => {
                         }
                         className="w-full"
                       />
+                    </div>
+                  ) : null}
+
+                  {selectedTeamPosition &&
+                  selectedTeamPositionCombos.length > 0 ? (
+                    <div className="space-y-1.5 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2">
+                      <p className="font-semibold text-[11px] text-violet-900 uppercase tracking-wide">
+                        Combos to send with this leg{' '}
+                        <span className="text-[10px] text-violet-600 normal-case">
+                          {commitIsFullPosition
+                            ? '(all included with full position)'
+                            : '(tap to include)'}
+                        </span>
+                      </p>
+                      {selectedTeamPositionCombos.map((combo) => {
+                        const selected = isTeamComboSelected(combo);
+                        return (
+                          <button
+                            key={combo.id}
+                            type="button"
+                            disabled={commitIsFullPosition}
+                            onClick={() =>
+                              setTeamComboSelectedIds((current) => {
+                                const next = new Set(current);
+                                if (next.has(combo.id)) {
+                                  next.delete(combo.id);
+                                } else {
+                                  next.add(combo.id);
+                                }
+                                return next;
+                              })
+                            }
+                            className={`flex w-full items-center gap-1.5 rounded-md border px-2 py-1.5 text-left text-xs transition ${
+                              selected
+                                ? 'border-indigo-300 bg-white'
+                                : 'border-gray-200 bg-white/40 opacity-60'
+                            } ${commitIsFullPosition ? 'cursor-default' : 'hover:border-indigo-400'}`}
+                          >
+                            <span
+                              className={`flex h-3.5 w-3.5 items-center justify-center rounded-[4px] border text-[9px] leading-none ${
+                                selected
+                                  ? 'border-indigo-500 bg-indigo-500 text-white'
+                                  : 'border-gray-300 bg-white'
+                              }`}
+                            >
+                              {selected ? '✓' : ''}
+                            </span>
+                            <span className="font-medium text-violet-800">
+                              {combo.optionLabel}
+                            </span>
+                            <span className="inline-flex rounded-full border border-indigo-200 bg-white px-1.5 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase">
+                              {combo.betType === 'spread' ? 'Spread' : 'Total'}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   ) : null}
 
