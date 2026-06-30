@@ -14,6 +14,7 @@ import {
 } from '@starter/backend/schema';
 import { createFileRoute } from '@tanstack/react-router';
 import { fetchEventCombos, getComboPrice } from '@/server/polymarket/combos';
+import { fetchPolymarketLiveStatus } from '@/server/polymarket/live';
 import { getLegSidePrice } from '@/server/polymarket/prices';
 
 type PositionSide = 'home' | 'draw' | 'away';
@@ -318,6 +319,33 @@ const getFallbackStatus = (kickoffIso: string): LiveStatusPayload => {
   };
 };
 
+// A match kicked off this long ago is over regardless of what the feed says —
+// guards against api-football echoing a stale "live"/extra-time elapsed.
+const DEFINITELY_FINAL_MINUTES = 210;
+
+const coerceStaleLiveToFinal = (
+  status: LiveStatusPayload,
+  kickoffIso: string
+): LiveStatusPayload => {
+  if (status.isFinal) {
+    return status;
+  }
+  const kickoff = new Date(kickoffIso);
+  if (Number.isNaN(kickoff.getTime())) {
+    return status;
+  }
+  if ((Date.now() - kickoff.getTime()) / 60000 <= DEFINITELY_FINAL_MINUTES) {
+    return status;
+  }
+  return {
+    ...status,
+    statusLabel: 'Final',
+    hasStarted: true,
+    isFinal: true,
+    eventTime: 'Final',
+  };
+};
+
 const toStatusPayload = (
   fixture: ApiFootballFixture,
   swapped = false
@@ -387,6 +415,9 @@ const findMatchingFixture = (
 const fetchLiveStatuses = async (
   events: Array<{
     marketId: string;
+    // The persisted sourceEventId for Polymarket live lookups (the `marketId`
+    // key above is the leg/share id used for keying the result).
+    eventId?: string | null;
     kickoff: string;
     homeTeam: string;
     awayTeam: string;
@@ -400,9 +431,30 @@ const fetchLiveStatuses = async (
     {}
   );
 
+  // Polymarket is the source of truth for the clock + score; query it for
+  // already-started events and prefer its result over api-football.
+  const now = Date.now();
+  const pmEntries = await Promise.all(
+    events.map(async (event) => {
+      const kickoffMs = new Date(event.kickoff).getTime();
+      const started = Number.isFinite(kickoffMs) && kickoffMs <= now;
+      const pm =
+        started && event.eventId
+          ? await fetchPolymarketLiveStatus(event.eventId)
+          : null;
+      return [event.marketId, pm] as const;
+    })
+  );
+  const pmByMarket = new Map(pmEntries);
+
   const apiKey = process.env.API_FOOTBALL_API_KEY?.trim();
   if (!apiKey || events.length === 0) {
-    return fallbackStatuses;
+    return events.reduce<Record<string, LiveStatusPayload>>((acc, event) => {
+      acc[event.marketId] =
+        pmByMarket.get(event.marketId) ??
+        coerceStaleLiveToFinal(fallbackStatuses[event.marketId], event.kickoff);
+      return acc;
+    }, {});
   }
 
   try {
@@ -478,10 +530,18 @@ const fetchLiveStatuses = async (
     const fixtures = [...liveFixtures, ...datedFixtures.flat()];
 
     return events.reduce<Record<string, LiveStatusPayload>>((acc, event) => {
+      const pm = pmByMarket.get(event.marketId);
+      if (pm) {
+        acc[event.marketId] = pm;
+        return acc;
+      }
       const matched = findMatchingFixture(event, fixtures);
-      acc[event.marketId] = matched
-        ? toStatusPayload(matched.fixture, matched.swapped)
-        : fallbackStatuses[event.marketId];
+      acc[event.marketId] = coerceStaleLiveToFinal(
+        matched
+          ? toStatusPayload(matched.fixture, matched.swapped)
+          : fallbackStatuses[event.marketId],
+        event.kickoff
+      );
       return acc;
     }, {});
   } catch {
@@ -815,6 +875,7 @@ const syncParlayStates = async (teamIds: string[]) => {
 
         return {
           marketId: share.id,
+          eventId: share.marketId,
           kickoff: position.kickoff,
           homeTeam: position.homeTeam,
           awayTeam: position.awayTeam,
@@ -825,6 +886,7 @@ const syncParlayStates = async (teamIds: string[]) => {
           entry
         ): entry is {
           marketId: string;
+          eventId: string | null;
           kickoff: string;
           homeTeam: string;
           awayTeam: string;
@@ -1252,6 +1314,7 @@ const buildTeamResponses = async (
 
         return {
           marketId: share.id,
+          eventId: share.marketId,
           kickoff: position.kickoff,
           homeTeam: position.homeTeam,
           awayTeam: position.awayTeam,
@@ -1262,6 +1325,7 @@ const buildTeamResponses = async (
           entry
         ): entry is {
           marketId: string;
+          eventId: string | null;
           kickoff: string;
           homeTeam: string;
           awayTeam: string;
@@ -1327,7 +1391,9 @@ const buildTeamResponses = async (
               : null,
             placedAt: share.placedAt.toISOString(),
             result:
-              share.result === 'WON' || share.result === 'LOST'
+              share.result === 'WON' ||
+              share.result === 'LOST' ||
+              share.result === 'ROLLED_OVER'
                 ? (share.result as LegResolution)
                 : resolveLegResult(position, statuses[share.id]),
             combos: legCombos

@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
+import { fetchPolymarketLiveStatus } from '@/server/polymarket/live';
 
 type LiveEventRequest = {
   events?: Array<{
@@ -201,6 +202,36 @@ const toStatusPayload = (
   };
 };
 
+// A match kicked off this long ago is over no matter what the feed says — guards
+// against api-football echoing a stale "live"/extra-time elapsed (e.g. a game
+// showing the 101st minute a day later). Covers 90' + stoppage + ET + penalties
+// + breaks with margin.
+const DEFINITELY_FINAL_MINUTES = 210;
+
+const coerceStaleLiveToFinal = (
+  status: LiveStatusPayload,
+  kickoffIso: string
+): LiveStatusPayload => {
+  if (status.isFinal) {
+    return status;
+  }
+  const kickoff = new Date(kickoffIso);
+  if (Number.isNaN(kickoff.getTime())) {
+    return status;
+  }
+  const minutesSince = (Date.now() - kickoff.getTime()) / 60000;
+  if (minutesSince <= DEFINITELY_FINAL_MINUTES) {
+    return status;
+  }
+  return {
+    ...status,
+    statusLabel: 'Final',
+    hasStarted: true,
+    isFinal: true,
+    eventTime: 'Final',
+  };
+};
+
 const findMatchingFixture = (
   event: LiveEventRequest['events'][number],
   fixtures: ApiFootballFixture[]
@@ -244,11 +275,37 @@ export const Route = createFileRoute('/api/live-event-time')({
           return acc;
         }, {});
 
+        // Polymarket is the source of truth for the clock + score. Only query it
+        // for events that have kicked off (a future game can't be live), and
+        // prefer its result over api-football below.
+        const now = Date.now();
+        const pmEntries = await Promise.all(
+          events.map(async (event) => {
+            const kickoffMs = new Date(event.kickoff).getTime();
+            const started = Number.isFinite(kickoffMs) && kickoffMs <= now;
+            const pm = started
+              ? await fetchPolymarketLiveStatus(event.marketId)
+              : null;
+            return [event.marketId, pm] as const;
+          })
+        );
+        const pmByMarket = new Map(pmEntries);
+
         const apiKey = process.env.API_FOOTBALL_API_KEY?.trim();
         if (!apiKey || events.length === 0) {
-          return Response.json({
-            statuses: fallbackStatuses,
-          } satisfies LiveEventResponse);
+          const statuses = events.reduce<Record<string, LiveStatusPayload>>(
+            (acc, event) => {
+              acc[event.marketId] =
+                pmByMarket.get(event.marketId) ??
+                coerceStaleLiveToFinal(
+                  fallbackStatuses[event.marketId],
+                  event.kickoff
+                );
+              return acc;
+            },
+            {}
+          );
+          return Response.json({ statuses } satisfies LiveEventResponse);
         }
 
         const uniqueDates = Array.from(
@@ -329,11 +386,20 @@ export const Route = createFileRoute('/api/live-event-time')({
 
         const statuses = events.reduce<Record<string, LiveStatusPayload>>(
           (acc, event) => {
+            const pm = pmByMarket.get(event.marketId);
+            if (pm) {
+              acc[event.marketId] = pm;
+              return acc;
+            }
+
             const matched = findMatchingFixture(event, allFixtures);
 
-            acc[event.marketId] = matched
-              ? toStatusPayload(matched.fixture, matched.swapped)
-              : fallbackStatuses[event.marketId];
+            acc[event.marketId] = coerceStaleLiveToFinal(
+              matched
+                ? toStatusPayload(matched.fixture, matched.swapped)
+                : fallbackStatuses[event.marketId],
+              event.kickoff
+            );
 
             return acc;
           },

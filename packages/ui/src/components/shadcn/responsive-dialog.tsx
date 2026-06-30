@@ -101,7 +101,7 @@ function ResponsiveDialogContent({
          * the breathing room the desktop Dialog got from its p-6.
          */}
         <div
-          className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pt-1 pb-5"
+          className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pt-2 pb-6"
           data-vaul-no-drag
         >
           {children}

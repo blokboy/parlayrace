@@ -1053,16 +1053,19 @@ const DashboardPage = () => {
                       key={card.id}
                       className="landing-panel p-6 transition-shadow hover:shadow-lg"
                     >
-                      <div className="mb-3 flex items-center justify-between gap-2">
-                        <h3 className="font-semibold text-lg text-violet-950">
-                          {card.matchup}
-                        </h3>
+                      {/* Status / outcome badge sits above the title so a long
+                          matchup + a team badge never have to share a row (and
+                          wrap) on mobile. */}
+                      <div className="mb-2 flex">
                         <StatusBadge
                           card={card}
                           status={liveStatuses[card.id]}
                           resolvedPrices={resolvedPrices}
                         />
                       </div>
+                      <h3 className="mb-3 font-semibold text-lg text-violet-950">
+                        {card.matchup}
+                      </h3>
 
                       <div className="mb-4 flex items-center gap-2 text-violet-800/80 text-xs">
                         {card.kickoff}

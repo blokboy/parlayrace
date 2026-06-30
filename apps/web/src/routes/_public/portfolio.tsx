@@ -3095,6 +3095,18 @@ const PortfolioPage = () => {
               </div>
             ) : (
               <>
+                <p className="text-sm text-violet-700">
+                  Current market price ({sellPosition?.buySide ?? '--'}): $
+                  {selectedSellPrice.toFixed(2)}
+                </p>
+
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-violet-900">Expected Proceeds</p>
+                  <p className="font-semibold text-sm text-violet-950">
+                    ${expectedSellValue.toFixed(2)}
+                  </p>
+                </div>
+
                 <button
                   type="button"
                   disabled={
@@ -3114,18 +3126,6 @@ const PortfolioPage = () => {
                   <span>Confirm SELL</span>
                   <span>${selectedSellPrice.toFixed(2)}</span>
                 </button>
-
-                <p className="text-sm text-violet-700">
-                  Current market price ({sellPosition?.buySide ?? '--'}): $
-                  {selectedSellPrice.toFixed(2)}
-                </p>
-
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-violet-900">Expected Proceeds</p>
-                  <p className="font-semibold text-sm text-violet-950">
-                    ${expectedSellValue.toFixed(2)}
-                  </p>
-                </div>
               </>
             )}
           </div>
