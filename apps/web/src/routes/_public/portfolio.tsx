@@ -863,6 +863,11 @@ const PortfolioPage = () => {
   const [sellShares, setSellShares] = useState(0);
   const [loadingSellDetail, setLoadingSellDetail] = useState(false);
   const [selling, setSelling] = useState(false);
+  // Which of the ML position's combos to include in a partial sale (a full sale
+  // always takes them all). Seeded to all when the sell sheet opens.
+  const [sellComboSelectedIds, setSellComboSelectedIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [positionCurrentPricesById, setPositionCurrentPricesById] = useState<
     Record<string, number>
   >({});
@@ -1673,6 +1678,18 @@ const PortfolioPage = () => {
   const openSellModal = (position: PaperPosition) => {
     setSellPosition(position);
     setSellShares(roundToCents(position.quantity));
+    setSellComboSelectedIds(
+      new Set(
+        portfolioState.positions
+          .filter(
+            (candidate) =>
+              candidate.parentPositionId === position.id &&
+              candidate.comboMarketId &&
+              candidate.status === 'OPEN'
+          )
+          .map((candidate) => candidate.id)
+      )
+    );
   };
 
   // Open the Spreads/Totals picker (bottom sheet on mobile), lazily fetching the
@@ -1828,8 +1845,10 @@ const PortfolioPage = () => {
 
   const expectedSellValue = roundToCents(sellShares * selectedSellPrice);
 
-  // Selling an ML position also liquidates its open spread/total combos in full,
-  // so surface each add-on's value and the aggregate before the user confirms.
+  // Selling an ML position can also liquidate its open spread/total combos. A
+  // full-position sale always takes them all; a partial (or 0-share) sale lets
+  // the user pick which combos go (sellComboSelectedIds). The shares slider can
+  // be 0 so a user can sell only combos.
   const sellComboChildren = sellPosition
     ? portfolioState.positions.filter(
         (position) =>
@@ -1838,16 +1857,28 @@ const PortfolioPage = () => {
           position.status === 'OPEN'
       )
     : [];
+  const sellIsFullPosition =
+    sellPosition !== null && sellShares >= sellPosition.quantity;
+  const isSellComboSelected = (combo: PaperPosition) =>
+    sellIsFullPosition || sellComboSelectedIds.has(combo.id);
+  const selectedSellComboChildren =
+    sellComboChildren.filter(isSellComboSelected);
   const sellComboValue = (combo: PaperPosition) =>
     roundToCents(
       combo.quantity * (positionCurrentPricesById[combo.id] ?? combo.entryPrice)
     );
+  const sellHasMlSale = sellShares > 0 && selectedSellPrice > 0;
+  const sellMlProceeds = sellHasMlSale ? expectedSellValue : 0;
   const sellComboProceeds = roundToCents(
-    sellComboChildren.reduce((sum, combo) => sum + sellComboValue(combo), 0)
+    selectedSellComboChildren.reduce(
+      (sum, combo) => sum + sellComboValue(combo),
+      0
+    )
   );
-  const sellAggregateValue = roundToCents(
-    expectedSellValue + sellComboProceeds
-  );
+  const sellAggregateValue = roundToCents(sellMlProceeds + sellComboProceeds);
+  // Something must actually be sold: ML shares and/or at least one combo.
+  const canConfirmSell =
+    !selling && (sellHasMlSale || selectedSellComboChildren.length > 0);
 
   const addSharesPalette = paletteForSelection(
     selectedTeamPosition,
@@ -1856,56 +1887,42 @@ const PortfolioPage = () => {
   const sellPalette = paletteForSelection(sellPosition, teamBrandingByName);
 
   const handleConfirmSell = async () => {
-    if (
-      !sellPosition ||
-      !sellDetail ||
-      selectedSellPrice <= 0 ||
-      sellShares <= 0 ||
-      selling
-    ) {
+    if (!sellPosition || !canConfirmSell) {
       return;
     }
 
     setSelling(true);
 
-    const effectiveSellShares = roundToCents(
-      Math.min(sellShares, sellPosition.quantity)
-    );
-
-    if (effectiveSellShares <= 0) {
-      setSelling(false);
-      return;
-    }
-
+    const effectiveSellShares = sellHasMlSale
+      ? roundToCents(Math.min(sellShares, sellPosition.quantity))
+      : 0;
     const mlProceeds = roundToCents(effectiveSellShares * selectedSellPrice);
     const remainingShares = roundToCents(
       sellPosition.quantity - effectiveSellShares
     );
 
-    // Selling the ML bet liquidates ALL its open combos at current value and
-    // folds that into the proceeds; the combos are removed from the portfolio.
-    const comboChildren = portfolioState.positions.filter(
-      (position) =>
-        position.parentPositionId === sellPosition.id &&
-        position.comboMarketId &&
-        position.status === 'OPEN'
-    );
+    // Only the selected combos are sold (a full-position sale selects them all);
+    // unselected combos stay attached to the still-open ML position.
     const comboProceeds = roundToCents(
-      comboChildren.reduce(
-        (sum, combo) =>
-          sum +
-          combo.quantity *
-            (positionCurrentPricesById[combo.id] ?? combo.entryPrice),
+      selectedSellComboChildren.reduce(
+        (sum, combo) => sum + sellComboValue(combo),
         0
       )
     );
-    const comboChildIds = new Set(comboChildren.map((combo) => combo.id));
+    const soldComboIds = new Set(
+      selectedSellComboChildren.map((combo) => combo.id)
+    );
     const proceeds = roundToCents(mlProceeds + comboProceeds);
 
+    if (proceeds <= 0) {
+      setSelling(false);
+      return;
+    }
+
     const nextPositions = portfolioState.positions
-      .filter((position) => !comboChildIds.has(position.id))
+      .filter((position) => !soldComboIds.has(position.id))
       .map((position) => {
-        if (position.id !== sellPosition.id) {
+        if (position.id !== sellPosition.id || effectiveSellShares <= 0) {
           return position;
         }
 
@@ -3134,28 +3151,70 @@ const PortfolioPage = () => {
 
                 {sellComboChildren.length > 0 ? (
                   <>
-                    <div className="space-y-1 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2">
+                    <div className="space-y-1.5 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2">
                       <p className="font-semibold text-[11px] text-violet-900 uppercase tracking-wide">
-                        Spread/Total add-ons (sold in full)
+                        Spread/Total add-ons{' '}
+                        <span className="text-[10px] text-violet-600 normal-case">
+                          {sellIsFullPosition
+                            ? '(all included with full sale)'
+                            : '(tap to include)'}
+                        </span>
                       </p>
-                      {sellComboChildren.map((combo) => (
-                        <div
-                          key={combo.id}
-                          className="flex items-center justify-between gap-2 text-xs"
-                        >
-                          <span className="flex items-center gap-1.5 text-violet-800">
-                            <span className="font-medium">
-                              {combo.optionLabel}
+                      {sellComboChildren.map((combo) => {
+                        const selected = isSellComboSelected(combo);
+                        return (
+                          <button
+                            key={combo.id}
+                            type="button"
+                            disabled={sellIsFullPosition}
+                            onClick={() =>
+                              setSellComboSelectedIds((current) => {
+                                const next = new Set(current);
+                                if (next.has(combo.id)) {
+                                  next.delete(combo.id);
+                                } else {
+                                  next.add(combo.id);
+                                }
+                                return next;
+                              })
+                            }
+                            className={`flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition ${
+                              selected
+                                ? 'border-indigo-300 bg-white'
+                                : 'border-gray-200 bg-white/40 opacity-60'
+                            } ${sellIsFullPosition ? 'cursor-default' : 'hover:border-indigo-400'}`}
+                          >
+                            <span className="flex items-center gap-1.5 text-violet-800">
+                              <span
+                                className={`flex h-3.5 w-3.5 items-center justify-center rounded-[4px] border text-[9px] leading-none ${
+                                  selected
+                                    ? 'border-indigo-500 bg-indigo-500 text-white'
+                                    : 'border-gray-300 bg-white'
+                                }`}
+                              >
+                                {selected ? '✓' : ''}
+                              </span>
+                              <span className="font-medium">
+                                {combo.optionLabel}
+                              </span>
+                              <span className="inline-flex rounded-full border border-indigo-200 bg-white px-1.5 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase">
+                                {combo.betType === 'spread'
+                                  ? 'Spread'
+                                  : 'Total'}
+                              </span>
                             </span>
-                            <span className="inline-flex rounded-full border border-indigo-200 bg-white px-1.5 py-0.5 font-semibold text-[10px] text-indigo-700 uppercase">
-                              {combo.betType === 'spread' ? 'Spread' : 'Total'}
+                            <span
+                              className={`font-semibold ${
+                                selected
+                                  ? 'text-violet-950'
+                                  : 'text-gray-400 line-through'
+                              }`}
+                            >
+                              +${sellComboValue(combo).toFixed(2)}
                             </span>
-                          </span>
-                          <span className="font-semibold text-violet-950">
-                            +${sellComboValue(combo).toFixed(2)}
-                          </span>
-                        </div>
-                      ))}
+                          </button>
+                        );
+                      })}
                     </div>
 
                     <div className="flex items-center justify-between border-violet-100 border-t pt-2">
@@ -3171,12 +3230,7 @@ const PortfolioPage = () => {
 
                 <button
                   type="button"
-                  disabled={
-                    selling ||
-                    !sellDetail ||
-                    selectedSellPrice <= 0 ||
-                    sellShares <= 0
-                  }
+                  disabled={!canConfirmSell}
                   onClick={() => void handleConfirmSell()}
                   style={{
                     backgroundColor: sellPalette.background,
@@ -3185,7 +3239,7 @@ const PortfolioPage = () => {
                   }}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50 max-md:py-1.5"
                 >
-                  <span>Confirm SELL</span>
+                  <span>{sellHasMlSale ? 'Confirm SELL' : 'Sell Add-ons'}</span>
                   <span>${sellAggregateValue.toFixed(2)}</span>
                 </button>
               </>
