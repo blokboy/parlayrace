@@ -15,34 +15,62 @@ export type PmLiveStatus = {
   scoreLabel: string | null;
 };
 
+type GammaTeam = {
+  name?: string | null;
+  logo?: string | null;
+  ordering?: string | null;
+};
+
 type GammaSportsEvent = {
   live?: boolean | null;
   ended?: boolean | null;
   closed?: boolean | null;
-  // "1-1" — home-away in the event's teams[] order.
+  // "1-1" — the two numbers are in teams[] array order, which is NOT always
+  // home-then-away (MLB events list [away, home]). Map via teams[].ordering.
   score?: string | null;
   elapsed?: string | null;
   period?: string | null;
+  teams?: GammaTeam[] | null;
 };
 
-const parseScore = (
+// Split "1-1" into the two raw numbers in teams[] array order (first, second).
+const parseScorePair = (
   score: string | null | undefined
-): { home: number | null; away: number | null; label: string | null } => {
+): { first: number | null; second: number | null } => {
   if (!score || !score.includes('-')) {
+    return { first: null, second: null };
+  }
+  const [rawFirst, rawSecond] = score.split('-');
+  const first = Number(rawFirst?.trim());
+  const second = Number(rawSecond?.trim());
+  return {
+    first: Number.isFinite(first) ? first : null,
+    second: Number.isFinite(second) ? second : null,
+  };
+};
+
+// The score's first number belongs to teams[0]. Home/away is decided by the
+// per-team `ordering` field (mirrors resolveEventTeams in sync.ts, which
+// defaults home to teams[0] when no ordering match is present).
+const mapScoreToHomeAway = (
+  event: GammaSportsEvent
+): { home: number | null; away: number | null; label: string | null } => {
+  const { first, second } = parseScorePair(event.score);
+  if (first === null && second === null) {
     return { home: null, away: null, label: null };
   }
-  const [rawHome, rawAway] = score.split('-');
-  const home = Number(rawHome?.trim());
-  const away = Number(rawAway?.trim());
-  const homeScore = Number.isFinite(home) ? home : null;
-  const awayScore = Number.isFinite(away) ? away : null;
+  const teams = event.teams ?? [];
+  const homeIdx = teams.findIndex((t) => t.ordering === 'home');
+  const homeIsFirst = homeIdx <= 0; // -1 (unknown → default teams[0]) or 0
+  const home = homeIsFirst ? first : second;
+  const away = homeIsFirst ? second : first;
   return {
-    home: homeScore,
-    away: awayScore,
+    home,
+    away,
     label:
-      homeScore !== null && awayScore !== null
-        ? `${homeScore}-${awayScore}`
-        : score,
+      home !== null && away !== null
+        ? `${home}-${away}`
+        : (event.score ?? null),
   };
 };
 
@@ -104,7 +132,7 @@ export const fetchPolymarketLiveStatus = async (
     return null;
   }
 
-  const score = parseScore(event.score);
+  const score = mapScoreToHomeAway(event);
   const rawScoreLabel = (event.score ?? '').trim() || null;
   // For tennis, expose the raw set score only (no numeric home/away).
   const homeScore = isTennis ? null : score.home;

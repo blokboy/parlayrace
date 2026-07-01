@@ -497,6 +497,94 @@ const formatLiveSummary = (
   return fallback;
 };
 
+// One team's icon for the live-score badge: DB logo (MLB square / tennis flag
+// image) when present, else the FIFA country emoji, else a 3-letter fallback.
+const LegTeamIcon = ({
+  teamName,
+  branding,
+  square = false,
+}: {
+  teamName: string;
+  branding: Record<string, TeamBranding>;
+  square?: boolean;
+}) => {
+  const brand = branding[teamName];
+  if (brand?.logo) {
+    return (
+      <img
+        src={brand.logo}
+        alt=""
+        className={
+          square
+            ? 'h-4 w-4 rounded-sm object-contain'
+            : 'h-3 w-4 rounded-[2px] object-cover'
+        }
+      />
+    );
+  }
+  const flag = countryNameToFlag(teamName);
+  return flag ? (
+    <span className="text-[12px] leading-none">{flag}</span>
+  ) : (
+    <span className="font-semibold text-[10px] uppercase">
+      {teamName.slice(0, 3)}
+    </span>
+  );
+};
+
+// Live status for a committed leg. When the game has started with numeric
+// scores, show each team's logo next to its own score (mirrors the dashboard
+// StatusBadge). Otherwise fall back to a text summary (tennis set scores) or,
+// before kickoff, the scheduled event time.
+const LegLiveStatus = ({
+  leg,
+  status,
+  branding,
+}: {
+  leg: TeamCommittedLeg;
+  status: LiveStatus | undefined;
+  branding: Record<string, TeamBranding>;
+}) => {
+  const isMlb = leg.category === 'mlb-games';
+
+  if (status?.hasStarted) {
+    if (status.homeScore !== null && status.awayScore !== null) {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-green-200 bg-white px-2 py-0.5 font-medium text-green-700 text-xs">
+          <LegTeamIcon
+            teamName={leg.homeTeam}
+            branding={branding}
+            square={isMlb}
+          />
+          <span className="font-semibold">{status.homeScore}</span>
+          <span className="opacity-50">-</span>
+          <span className="font-semibold">{status.awayScore}</span>
+          <LegTeamIcon
+            teamName={leg.awayTeam}
+            branding={branding}
+            square={isMlb}
+          />
+          {status.eventTime ? (
+            <span className="opacity-75">· {status.eventTime}</span>
+          ) : null}
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex rounded-full border border-green-200 bg-white px-2 py-0.5 font-medium text-green-700 text-xs">
+        {formatLiveSummary(status, status.statusLabel ?? 'Live')}
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-gray-600 text-xs">
+      {formatTradeTime(leg.kickoff)}
+    </span>
+  );
+};
+
 const getLegBadgeClassName = (
   leg: TeamCommittedLeg,
   status: LiveStatus | undefined
@@ -1122,10 +1210,18 @@ const PortfolioPage = () => {
   useEffect(() => {
     const teamNames = Array.from(
       new Set(
-        openPositions.flatMap((position) => [
-          position.homeTeam,
-          position.awayTeam,
-        ])
+        [
+          ...openPositions.flatMap((position) => [
+            position.homeTeam,
+            position.awayTeam,
+          ]),
+          // Committed parlay legs also render team logos (leg outcome badge +
+          // live score), so their teams need branding even without an open
+          // position on the same game.
+          ...parlayTeams.flatMap((team) =>
+            team.committedLegs.flatMap((leg) => [leg.homeTeam, leg.awayTeam])
+          ),
+        ].filter(Boolean)
       )
     );
 
@@ -1148,7 +1244,7 @@ const PortfolioPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [openPositions]);
+  }, [openPositions, parlayTeams]);
 
   const getPositionCurrentPrice = (position: PaperPosition) => {
     return positionCurrentPricesById[position.id] ?? position.entryPrice;
@@ -2816,15 +2912,11 @@ const PortfolioPage = () => {
                           </div>
 
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                            <span className="inline-flex rounded-full border border-green-200 bg-white px-2 py-0.5 font-medium text-green-700">
-                              {formatLiveSummary(
-                                liveStatus,
-                                liveStatus?.statusLabel ?? 'OPEN'
-                              )}
-                            </span>
-                            <span className="text-gray-600">
-                              {formatTradeTime(leg.kickoff)}
-                            </span>
+                            <LegLiveStatus
+                              leg={leg}
+                              status={liveStatus}
+                              branding={teamBrandingByName}
+                            />
                           </div>
 
                           <div className="mt-2 grid grid-cols-2 gap-3">
