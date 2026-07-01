@@ -417,11 +417,15 @@ const fetchMarketDetail = async (
 const FlagButton = ({
   team,
   draw = false,
+  neutral = false,
   onClick,
   disabled = false,
 }: {
   team: { name: string; logo: string; color: string | null };
   draw?: boolean;
+  // Keep a white background (still shows the flag icon) — used for tennis so the
+  // side selections stay visually consistent instead of team-colored.
+  neutral?: boolean;
   onClick?: () => void;
   disabled?: boolean;
 }) => {
@@ -445,12 +449,20 @@ const FlagButton = ({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="w-full rounded-lg border px-3 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
-      style={{
-        backgroundColor: palette.background,
-        color: palette.color,
-        borderColor: palette.border,
-      }}
+      className={
+        neutral
+          ? '!bg-white hover:!bg-white w-full rounded-lg border border-violet-200 px-3 py-2 font-semibold text-sm text-violet-900 transition hover:border-violet-400 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50'
+          : 'w-full rounded-lg border px-3 py-2 font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-50'
+      }
+      style={
+        neutral
+          ? undefined
+          : {
+              backgroundColor: palette.background,
+              color: palette.color,
+              borderColor: palette.border,
+            }
+      }
     >
       <span className="inline-flex items-center justify-center gap-2">
         {team.logo ? (
@@ -848,7 +860,21 @@ const DashboardPage = () => {
       };
 
       if (!cancelled) {
-        setLiveStatuses(payload.statuses ?? {});
+        // Merge into the existing map rather than replacing it: we only poll
+        // not-yet-final cards, so a full replace would drop concluded cards'
+        // statuses and make them render as active/OPEN again. Also never let a
+        // stale "live" response downgrade a card we already marked final — once
+        // concluded, a card stays concluded.
+        setLiveStatuses((prev) => {
+          const next = { ...prev };
+          for (const [id, status] of Object.entries(payload.statuses ?? {})) {
+            if (prev[id]?.isFinal) {
+              continue;
+            }
+            next[id] = status;
+          }
+          return next;
+        });
       }
     };
 
@@ -1181,6 +1207,7 @@ const DashboardPage = () => {
                       <div className="flex flex-col gap-2">
                         <FlagButton
                           team={card.home}
+                          neutral={card.category === 'tennis-games'}
                           disabled={Boolean(liveStatuses[card.id]?.isFinal)}
                           onClick={() => openTradeModal(card, 'home')}
                         />
@@ -1194,6 +1221,7 @@ const DashboardPage = () => {
                         ) : null}
                         <FlagButton
                           team={card.away}
+                          neutral={card.category === 'tennis-games'}
                           disabled={Boolean(liveStatuses[card.id]?.isFinal)}
                           onClick={() => openTradeModal(card, 'away')}
                         />
