@@ -185,16 +185,25 @@ const startOfDayUtc = (d: Date) =>
 // the dashboard never asks for days the sync didn't populate.
 const SYNC_WINDOW_DAYS = 8;
 
-const isCloseTimeWithinWindow = (isoDate: string | undefined): boolean => {
+const isCloseTimeWithinWindow = (
+  isoDate: string | undefined,
+  windowDays: number = SYNC_WINDOW_DAYS
+): boolean => {
   if (!isoDate) return false;
   const d = new Date(isoDate);
   if (Number.isNaN(d.getTime())) return false;
   const now = new Date();
   const today = startOfDayUtc(now);
   const windowEnd = new Date(today);
-  windowEnd.setUTCDate(windowEnd.getUTCDate() + SYNC_WINDOW_DAYS);
+  windowEnd.setUTCDate(windowEnd.getUTCDate() + windowDays);
   return d >= today && d < windowEnd;
 };
+
+// Tennis is restricted to today + tomorrow (matches are added round-by-round);
+// FIFA/MLB use the full upcoming window.
+const TENNIS_WINDOW_DAYS = 2;
+const windowDaysForCategory = (category: MarketCategory): number =>
+  category === 'tennis-games' ? TENNIS_WINDOW_DAYS : SYNC_WINDOW_DAYS;
 
 // Scrape polymarket.com/sports/world-cup/games for game slugs, then fetch
 // each slug from the Gamma events API. Falls back to tag pagination.
@@ -315,6 +324,8 @@ export const fetchMlbGameEvents = async (
 
 // Fetch Wimbledon match events (singles + doubles) from the `wimbledon` tag.
 // Every 2-team event is a match; teams=0 events are tournament futures/props.
+// The today+tomorrow restriction is applied later by the per-category window
+// filter (on the resolved game time), so live carryover matches still count.
 export const fetchTennisGameEvents = async (
   limit = 1000
 ): Promise<PolymarketEvent[]> => {
@@ -895,7 +906,12 @@ export const syncPolyMarketMarkets = async (
           __awayColor: teams.awayColor,
         }));
       })
-      .filter((market) => isCloseTimeWithinWindow(market.__gameTimeIso))
+      .filter((market) =>
+        isCloseTimeWithinWindow(
+          market.__gameTimeIso,
+          windowDaysForCategory(market.__category)
+        )
+      )
       .filter((market) => passesCategoryFilter(market))
       .slice(0, limit);
 
